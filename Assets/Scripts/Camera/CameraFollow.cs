@@ -8,18 +8,40 @@ public class CameraFollow : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (target == null)
+        Transform followTarget = ResolveTarget();
+        if (followTarget == null)
         {
             return;
         }
 
-        // Calculate the camera's desired position
-        Vector3 desiredPosition = target.position + offset;
-
-        // Smoothly move the camera toward the target
+        Vector3 desiredPosition = followTarget.position + offset;
         float lerpFactor = Mathf.Clamp01(followSpeed * Time.deltaTime);
         transform.position = Vector3.Lerp(transform.position, desiredPosition, lerpFactor);
+    }
 
-        // Keep the camera rotation unchanged
+    private Transform ResolveTarget()
+    {
+        if (target != null)
+        {
+            if (target.name == "Player" || target.name == "PlayerArmature")
+            {
+                Transform armature = target.Find("PlayerArmature");
+                if (armature != null)
+                {
+                    return armature;
+                }
+            }
+
+            return target;
+        }
+
+        GameObject armatureObject = GameObject.Find("PlayerArmature");
+        if (armatureObject != null)
+        {
+            return armatureObject.transform;
+        }
+
+        GameObject playerObject = GameObject.Find("Player");
+        return playerObject != null ? playerObject.transform : null;
     }
 }
