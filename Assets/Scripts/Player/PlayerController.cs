@@ -1,16 +1,84 @@
 using UnityEngine;
+using System.Collections.Generic;
 
+[RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(CapsuleCollider))]
 public class PlayerController : MonoBehaviour
 {
     [SerializeField] private float moveSpeed = 5f;
+    [SerializeField] private float capsuleHeight = 1.8f;
+    [SerializeField] private float capsuleRadius = 0.35f;
+    [SerializeField] private Vector3 capsuleCenter = new Vector3(0f, 0.9f, 0f);
+    [SerializeField] private LayerMask movementCollisionMask = -1;
+    [SerializeField] private float pushForce = 190f;
+    [SerializeField] private float skinWidth = 0.04f;
+    [SerializeField] private bool enableCartGrab = false;
+    [SerializeField] private bool enableCartGrabToggle = true;
+    [SerializeField] private KeyCode cartGrabToggleKey = KeyCode.E;
+    [SerializeField] private float handleGrabSearchRadius = 2.6f;
+    [SerializeField] private float grabbedInputDeadZone = 0.12f;
+    [SerializeField] private bool mouseControlsGrabbedCart = true;
+    [SerializeField] private bool rightClickTogglesCartGrab = true;
+    [SerializeField] private bool quickLeftClickReleasesCart = true;
+    [SerializeField] private float leftClickReleaseMaxHoldTime = 0.18f;
+    [SerializeField] private float rightClickReleaseDoubleClickWindow = 0.35f;
+    [SerializeField] private float mouseControlStopDistance = 0.35f;
+    [SerializeField] private float mouseControlFullSpeedDistance = 2.4f;
+    [SerializeField] private float mouseControlInputLerpSpeed = 10f;
 
     private Rigidbody rb;
+    private CapsuleCollider capsule;
     private Vector3 movementInput;
+    private Vector3 keyboardMovementInput;
+    private Vector3 mouseMovementInput;
+    private float leftMouseDownTime = -999f;
+    private float lastRightClickTime = -999f;
+    private float lockedY;
+    private CartController grabbedCart;
+    private Collider[] playerColliders;
+    private Collider[] ignoredCartColliders;
+    private PlayerCartHandleIK handleIK;
+    private Animator playerAnimator;
+    private Transform hipsBone;
+    private Transform visualRoot;
+    private Vector3 visualRootLocalPosition;
+    private Quaternion visualRootLocalRotation;
+    private bool useNestedMovementController;
+    private Behaviour[] disabledGrabPushBehaviours;
+
+    public bool IsPushingCart => grabbedCart != null;
 
     private void Awake()
     {
-        // Get the Rigidbody attached to this GameObject
         rb = GetComponent<Rigidbody>();
+        capsule = GetComponent<CapsuleCollider>();
+        handleIK = GetComponentInChildren<PlayerCartHandleIK>();
+        playerAnimator = GetComponentInChildren<Animator>();
+        if (handleIK == null)
+        {
+            if (playerAnimator != null)
+            {
+                handleIK = playerAnimator.gameObject.AddComponent<PlayerCartHandleIK>();
+            }
+        }
+
+        lockedY = transform.position.y;
+        if (capsule == null)
+        {
+            capsule = gameObject.AddComponent<CapsuleCollider>();
+        }
+
+        rb.isKinematic = true;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+        rb.constraints = RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+
+        capsule.height = capsuleHeight;
+        capsule.radius = capsuleRadius;
+        capsule.center = capsuleCenter;
+        capsule.isTrigger = false;
+        playerColliders = GetComponentsInChildren<Collider>();
+        CacheVisualRoot();
     }
 
     private void Update()
@@ -20,24 +88,445 @@ public class PlayerController : MonoBehaviour
         float verticalInput = Input.GetAxisRaw("Vertical");
 
         // Build a movement vector on the XZ plane
-        movementInput = new Vector3(horizontalInput, 0f, verticalInput);
+        keyboardMovementInput = new Vector3(horizontalInput, 0f, verticalInput);
 
         // Normalize so diagonal movement is not faster
-        if (movementInput.sqrMagnitude > 1f)
+        if (keyboardMovementInput.sqrMagnitude > 1f)
         {
-            movementInput.Normalize();
+            keyboardMovementInput.Normalize();
         }
+
+        if (enableCartGrabToggle && Input.GetKeyDown(cartGrabToggleKey))
+        {
+            ToggleCartGrab();
+        }
+
+        if (rightClickTogglesCartGrab && Input.GetMouseButtonDown(1))
+        {
+            HandleRightClickCartAction();
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            leftMouseDownTime = Time.time;
+        }
+
+        if (quickLeftClickReleasesCart && grabbedCart != null && Input.GetMouseButtonUp(0) && Time.time - leftMouseDownTime <= leftClickReleaseMaxHoldTime)
+        {
+            grabbedCart.ReleaseGrab(this);
+        }
+
+        movementInput = GetDesiredMovementInput();
     }
 
     private void FixedUpdate()
     {
-        // Move the Rigidbody in FixedUpdate
-        if (movementInput == Vector3.zero)
+        if (grabbedCart != null)
+        {
+            HandleGrabbedCartMovement();
+            return;
+        }
+
+        if (TryGrabNearbyCart())
+        {
+            return;
+        }
+
+        if (useNestedMovementController)
         {
             return;
         }
 
         Vector3 movement = movementInput * moveSpeed * Time.fixedDeltaTime;
-        rb.MovePosition(rb.position + movement);
+        Vector3 allowedMovement = GetAllowedMovement(movement);
+        Vector3 nextPosition = rb.position + allowedMovement;
+        nextPosition.y = lockedY;
+        rb.MovePosition(nextPosition);
+    }
+
+    private void LateUpdate()
+    {
+        if (grabbedCart != null)
+        {
+            grabbedCart.SetGrabberFollowTarget(this, GetGrabberPosition(), GetGrabberRotation(), new Vector2(movementInput.x, movementInput.z));
+        }
+    }
+
+    public void AttachToCart(CartController cart)
+    {
+        if (grabbedCart == cart)
+        {
+            return;
+        }
+
+        RestoreIgnoredCartCollisions();
+        DisableGrabPushBehaviours();
+        grabbedCart = cart;
+        ignoredCartColliders = cart.GetComponentsInChildren<Collider>();
+        foreach (Collider playerCollider in playerColliders)
+        {
+            foreach (Collider cartCollider in ignoredCartColliders)
+            {
+                if (playerCollider != null && cartCollider != null)
+                {
+                    Physics.IgnoreCollision(playerCollider, cartCollider, true);
+                }
+            }
+        }
+
+        if (handleIK != null)
+        {
+            handleIK.SetCart(cart);
+        }
+
+        cart.SetGrabberFollowTarget(this, GetGrabberPosition(), GetGrabberRotation(), new Vector2(movementInput.x, movementInput.z));
+    }
+
+    public void DetachFromCart(CartController cart)
+    {
+        if (grabbedCart != cart)
+        {
+            return;
+        }
+
+        RestoreGrabPushBehaviours();
+        RestoreIgnoredCartCollisions();
+        if (handleIK != null)
+        {
+            handleIK.SetCart(null);
+        }
+
+        grabbedCart = null;
+    }
+
+    public Vector3 GetGrabberPosition()
+    {
+        if (hipsBone != null)
+        {
+            Vector3 position = hipsBone.position;
+            position.y = visualRoot != null ? visualRoot.position.y : transform.position.y;
+            return position;
+        }
+
+        return visualRoot != null ? visualRoot.position : transform.position;
+    }
+
+    public Quaternion GetGrabberRotation()
+    {
+        return visualRoot != null ? visualRoot.rotation : transform.rotation;
+    }
+
+    public void SnapToCartGrabPose(Vector3 position, Quaternion rotation)
+    {
+        position.y = lockedY;
+        rb.MovePosition(position);
+        rb.MoveRotation(rotation);
+        transform.SetPositionAndRotation(position, rotation);
+        ResetVisualRoot();
+    }
+
+    private void CacheVisualRoot()
+    {
+        visualRoot = playerAnimator != null && playerAnimator.transform != transform ? playerAnimator.transform : null;
+        if (playerAnimator != null && playerAnimator.isHuman)
+        {
+            hipsBone = playerAnimator.GetBoneTransform(HumanBodyBones.Hips);
+        }
+
+        foreach (Behaviour behaviour in GetComponentsInChildren<Behaviour>(true))
+        {
+            if (behaviour == null || behaviour == this || !IsNestedMovementBehaviour(behaviour))
+            {
+                continue;
+            }
+
+            useNestedMovementController = true;
+            if (visualRoot == null && behaviour.transform != transform)
+            {
+                visualRoot = behaviour.transform;
+            }
+        }
+
+        if (visualRoot != null)
+        {
+            visualRootLocalPosition = visualRoot.localPosition;
+            visualRootLocalRotation = visualRoot.localRotation;
+        }
+    }
+
+    private bool IsNestedMovementBehaviour(Behaviour behaviour)
+    {
+        string typeName = behaviour.GetType().FullName;
+        return typeName == "StarterAssets.ThirdPersonController" || IsPushBehaviour(behaviour);
+    }
+
+    private void DisableGrabPushBehaviours()
+    {
+        List<Behaviour> pushBehaviours = new List<Behaviour>();
+        foreach (Behaviour behaviour in GetComponentsInChildren<Behaviour>(true))
+        {
+            if (behaviour == null || !behaviour.enabled || !IsPushBehaviour(behaviour))
+            {
+                continue;
+            }
+
+            pushBehaviours.Add(behaviour);
+            behaviour.enabled = false;
+        }
+
+        disabledGrabPushBehaviours = pushBehaviours.ToArray();
+    }
+
+    private bool IsPushBehaviour(Behaviour behaviour)
+    {
+        string typeName = behaviour.GetType().FullName;
+        return typeName == "BasicRigidBodyPush" || typeName == "PushObj";
+    }
+
+    private void RestoreGrabPushBehaviours()
+    {
+        if (disabledGrabPushBehaviours == null)
+        {
+            return;
+        }
+
+        foreach (Behaviour behaviour in disabledGrabPushBehaviours)
+        {
+            if (behaviour != null)
+            {
+                behaviour.enabled = true;
+            }
+        }
+
+        disabledGrabPushBehaviours = null;
+    }
+
+    private void ResetVisualRoot()
+    {
+        if (visualRoot == null)
+        {
+            return;
+        }
+
+        visualRoot.localPosition = visualRootLocalPosition;
+        visualRoot.localRotation = visualRootLocalRotation;
+    }
+
+    private void RestoreIgnoredCartCollisions()
+    {
+        if (ignoredCartColliders == null || playerColliders == null)
+        {
+            return;
+        }
+
+        foreach (Collider playerCollider in playerColliders)
+        {
+            foreach (Collider cartCollider in ignoredCartColliders)
+            {
+                if (playerCollider != null && cartCollider != null)
+                {
+                    Physics.IgnoreCollision(playerCollider, cartCollider, false);
+                }
+            }
+        }
+
+        ignoredCartColliders = null;
+    }
+
+    private bool TryGrabNearbyCart()
+    {
+        if (!enableCartGrab)
+        {
+            return false;
+        }
+
+        CartController[] carts = FindObjectsByType<CartController>(FindObjectsInactive.Exclude);
+        foreach (CartController cart in carts)
+        {
+            if (cart == null || cart.IsGrabbed || !cart.CanGrabFrom(GetGrabberPosition()))
+            {
+                continue;
+            }
+
+            if (cart.TryGrab(this))
+            {
+                grabbedCart = cart;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ToggleCartGrab()
+    {
+        if (grabbedCart != null)
+        {
+            grabbedCart.ReleaseGrab(this);
+            return;
+        }
+
+        TryGrabClosestCart();
+    }
+
+    private void HandleRightClickCartAction()
+    {
+        if (grabbedCart == null)
+        {
+            TryGrabClosestCart();
+            lastRightClickTime = -999f;
+            return;
+        }
+
+        bool doubleClick = Time.time - lastRightClickTime <= rightClickReleaseDoubleClickWindow;
+        lastRightClickTime = Time.time;
+        if (doubleClick)
+        {
+            grabbedCart.ReleaseGrab(this);
+            return;
+        }
+
+        grabbedCart.TryAttachCartAheadToRow();
+    }
+
+    private bool TryGrabClosestCart()
+    {
+        CartController[] carts = FindObjectsByType<CartController>(FindObjectsInactive.Exclude);
+        CartController closestCart = null;
+        float closestDistance = handleGrabSearchRadius;
+        Vector3 grabberPosition = GetGrabberPosition();
+
+        foreach (CartController cart in carts)
+        {
+            if (cart == null || cart.IsGrabbed || !cart.CanGrabFrom(grabberPosition))
+            {
+                continue;
+            }
+
+            float distance = Vector3.Distance(grabberPosition, cart.GetCartGrabPointWorldPosition());
+            if (distance <= closestDistance)
+            {
+                closestDistance = distance;
+                closestCart = cart;
+            }
+        }
+
+        return closestCart != null && closestCart.TryGrab(this);
+    }
+
+    private Vector3 GetDesiredMovementInput()
+    {
+        if (grabbedCart == null || !mouseControlsGrabbedCart)
+        {
+            return keyboardMovementInput;
+        }
+
+        Vector3 targetMouseInput = Input.GetMouseButton(0) && TryGetMouseMovementInput(out Vector3 mouseInput) ? mouseInput : Vector3.zero;
+        mouseMovementInput = Vector3.MoveTowards(mouseMovementInput, targetMouseInput, mouseControlInputLerpSpeed * Time.deltaTime);
+        return mouseMovementInput.sqrMagnitude > keyboardMovementInput.sqrMagnitude ? mouseMovementInput : keyboardMovementInput;
+    }
+
+    private bool TryGetMouseMovementInput(out Vector3 input)
+    {
+        input = Vector3.zero;
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return false;
+        }
+
+        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+        Plane groundPlane = new Plane(Vector3.up, new Vector3(0f, lockedY, 0f));
+        if (!groundPlane.Raycast(ray, out float rayDistance))
+        {
+            return false;
+        }
+
+        Vector3 mouseWorldPoint = ray.GetPoint(rayDistance);
+        Vector3 toMouse = Vector3.ProjectOnPlane(mouseWorldPoint - GetGrabberPosition(), Vector3.up);
+        float distance = toMouse.magnitude;
+        if (distance <= mouseControlStopDistance)
+        {
+            return true;
+        }
+
+        float speedBlend = Mathf.InverseLerp(mouseControlStopDistance, mouseControlFullSpeedDistance, distance);
+        input = toMouse.normalized * speedBlend;
+        return true;
+    }
+
+    private void HandleGrabbedCartMovement()
+    {
+        if (grabbedCart.IsTipped || !grabbedCart.IsGrabbedBy(this))
+        {
+            RestoreGrabPushBehaviours();
+            RestoreIgnoredCartCollisions();
+            if (handleIK != null)
+            {
+                handleIK.SetCart(null);
+            }
+
+            grabbedCart = null;
+            return;
+        }
+
+        Vector2 cartInput = new Vector2(movementInput.x, movementInput.z);
+        if (cartInput.magnitude < grabbedInputDeadZone)
+        {
+            cartInput = Vector2.zero;
+        }
+
+        grabbedCart.SetGrabInput(this, cartInput);
+    }
+
+    private Vector3 GetAllowedMovement(Vector3 movement)
+    {
+        float distance = movement.magnitude;
+        if (distance <= 0f)
+        {
+            return Vector3.zero;
+        }
+
+        Vector3 direction = movement / distance;
+        Vector3 worldCenter = transform.TransformPoint(capsule.center);
+        float halfHeight = Mathf.Max(0f, (capsule.height * 0.5f) - capsule.radius);
+        Vector3 bottom = worldCenter + Vector3.down * halfHeight;
+        Vector3 top = worldCenter + Vector3.up * halfHeight;
+
+        if (!Physics.CapsuleCast(bottom, top, capsule.radius, direction, out RaycastHit hit, distance + skinWidth, movementCollisionMask, QueryTriggerInteraction.Ignore))
+        {
+            return movement;
+        }
+
+        CartController cart = hit.rigidbody != null ? hit.rigidbody.GetComponent<CartController>() : hit.collider.GetComponentInParent<CartController>();
+        if (cart != null)
+        {
+            if (enableCartGrab && cart.TryGrab(this))
+            {
+                grabbedCart = cart;
+                return Vector3.zero;
+            }
+
+            cart.ReceivePlayerPush(direction * pushForce, hit.point);
+        }
+
+        float allowedDistance = Mathf.Max(0f, hit.distance - skinWidth);
+        return direction * allowedDistance;
+    }
+
+    private void OnValidate()
+    {
+        moveSpeed = Mathf.Max(0f, moveSpeed);
+        capsuleHeight = Mathf.Max(0.1f, capsuleHeight);
+        capsuleRadius = Mathf.Max(0.01f, capsuleRadius);
+        pushForce = Mathf.Max(0f, pushForce);
+        skinWidth = Mathf.Max(0f, skinWidth);
+        handleGrabSearchRadius = Mathf.Max(0f, handleGrabSearchRadius);
+        grabbedInputDeadZone = Mathf.Clamp01(grabbedInputDeadZone);
+        leftClickReleaseMaxHoldTime = Mathf.Max(0f, leftClickReleaseMaxHoldTime);
+        rightClickReleaseDoubleClickWindow = Mathf.Max(0f, rightClickReleaseDoubleClickWindow);
+        mouseControlStopDistance = Mathf.Max(0f, mouseControlStopDistance);
+        mouseControlFullSpeedDistance = Mathf.Max(mouseControlStopDistance, mouseControlFullSpeedDistance);
+        mouseControlInputLerpSpeed = Mathf.Max(0f, mouseControlInputLerpSpeed);
     }
 }

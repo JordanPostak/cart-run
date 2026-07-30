@@ -78,6 +78,12 @@ namespace StarterAssets
         [Tooltip("For locking the camera position on all axis")]
         public bool LockCameraPosition = false;
 
+        [Header("Cart Push Mouse Control")]
+        public bool MouseClickControlsMovement = true;
+        public float MouseMoveStopDistance = 0.35f;
+        public float MouseMoveFullSpeedDistance = 2.4f;
+        public float MouseRunDoubleClickWindow = 0.35f;
+
         // cinemachine
         private float _cinemachineTargetYaw;
         private float _cinemachineTargetPitch;
@@ -107,7 +113,10 @@ namespace StarterAssets
         private Animator _animator;
         private CharacterController _controller;
         private StarterAssetsInputs _input;
+        private PlayerController _cartPushController;
         private GameObject _mainCamera;
+        private float _lastLeftClickTime = -999f;
+        private bool _mouseRunHeld;
 
         private const float _threshold = 0.01f;
 
@@ -142,6 +151,7 @@ namespace StarterAssets
             _hasAnimator = TryGetComponent(out _animator);
             _controller = GetComponent<CharacterController>();
             _input = GetComponent<StarterAssetsInputs>();
+            _cartPushController = GetComponentInParent<PlayerController>();
 #if ENABLE_INPUT_SYSTEM 
             _playerInput = GetComponent<PlayerInput>();
 #else
@@ -158,6 +168,7 @@ namespace StarterAssets
         private void Update()
         {
             _hasAnimator = TryGetComponent(out _animator);
+            UpdateMouseClickRunState();
 
             JumpAndGravity();
             GroundedCheck();
@@ -217,19 +228,26 @@ namespace StarterAssets
         private void Move()
         {
             // set target speed based on move speed, sprint speed and if sprint is pressed
-            float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
+            float targetSpeed = _input.sprint || _mouseRunHeld ? SprintSpeed : MoveSpeed;
+            Vector2 moveInput = _input.move;
+            bool hasMouseDirection = TryGetMouseMoveDirection(out Vector3 mouseDirection, out float mouseInputMagnitude);
+            bool usingMouseDirection = hasMouseDirection && mouseInputMagnitude > moveInput.magnitude;
+            if (usingMouseDirection)
+            {
+                moveInput = Vector2.up * mouseInputMagnitude;
+            }
 
             // a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
 
             // note: Vector2's == operator uses approximation so is not floating point error prone, and is cheaper than magnitude
             // if there is no input, set the target speed to 0
-            if (_input.move == Vector2.zero) targetSpeed = 0.0f;
+            if (moveInput == Vector2.zero) targetSpeed = 0.0f;
 
             // a reference to the players current horizontal velocity
             float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0.0f, _controller.velocity.z).magnitude;
 
             float speedOffset = 0.1f;
-            float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
+            float inputMagnitude = usingMouseDirection ? mouseInputMagnitude : (_input.analogMovement ? moveInput.magnitude : 1f);
 
             // accelerate or decelerate to target speed
             if (currentHorizontalSpeed < targetSpeed - speedOffset ||
@@ -252,14 +270,16 @@ namespace StarterAssets
             if (_animationBlend < 0.01f) _animationBlend = 0f;
 
             // normalise input direction
-            Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
+            Vector3 inputDirection = new Vector3(moveInput.x, 0.0f, moveInput.y).normalized;
 
             // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
             // if there is a move input rotate player when the player is moving
-            if (_input.move != Vector2.zero)
+            if (moveInput != Vector2.zero)
             {
-                _targetRotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg +
-                                  _mainCamera.transform.eulerAngles.y;
+                _targetRotation = usingMouseDirection
+                    ? Mathf.Atan2(mouseDirection.x, mouseDirection.z) * Mathf.Rad2Deg
+                    : Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.eulerAngles.y;
+
                 float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, _targetRotation, ref _rotationVelocity,
                     RotationSmoothTime);
 
@@ -280,6 +300,61 @@ namespace StarterAssets
                 _animator.SetFloat(_animIDSpeed, _animationBlend);
                 _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
             }
+        }
+
+        private void UpdateMouseClickRunState()
+        {
+            if (!MouseClickControlsMovement)
+            {
+                _mouseRunHeld = false;
+                return;
+            }
+
+            if (Input.GetMouseButtonDown(0))
+            {
+                _mouseRunHeld = Time.time - _lastLeftClickTime <= MouseRunDoubleClickWindow;
+                _lastLeftClickTime = Time.time;
+            }
+
+            if (!Input.GetMouseButton(0))
+            {
+                _mouseRunHeld = false;
+            }
+        }
+
+        private bool TryGetMouseMoveDirection(out Vector3 direction, out float inputMagnitude)
+        {
+            direction = Vector3.zero;
+            inputMagnitude = 0f;
+            if (!MouseClickControlsMovement || !Input.GetMouseButton(0) || _mainCamera == null)
+            {
+                return false;
+            }
+
+            Camera inputCamera = Camera.main != null ? Camera.main : _mainCamera.GetComponent<Camera>();
+            if (inputCamera == null)
+            {
+                return false;
+            }
+
+            Ray ray = inputCamera.ScreenPointToRay(Input.mousePosition);
+            Plane groundPlane = new Plane(Vector3.up, transform.position);
+            if (!groundPlane.Raycast(ray, out float rayDistance))
+            {
+                return false;
+            }
+
+            Vector3 mouseWorldPoint = ray.GetPoint(rayDistance);
+            Vector3 toMouse = Vector3.ProjectOnPlane(mouseWorldPoint - transform.position, Vector3.up);
+            float distance = toMouse.magnitude;
+            if (distance <= MouseMoveStopDistance)
+            {
+                return true;
+            }
+
+            direction = toMouse.normalized;
+            inputMagnitude = Mathf.InverseLerp(MouseMoveStopDistance, MouseMoveFullSpeedDistance, distance);
+            return true;
         }
 
         private void JumpAndGravity()
