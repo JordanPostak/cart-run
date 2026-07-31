@@ -33,9 +33,12 @@ public partial class CartController
         idleSpeedThreshold = Mathf.Max(0f, idleSpeedThreshold);
         idleAngularSpeedThreshold = Mathf.Max(0f, idleAngularSpeedThreshold);
         nestedRowScanDistance = Mathf.Max(0f, nestedRowScanDistance);
+        nestedRowAttachZoneDepth = Mathf.Max(0f, nestedRowAttachZoneDepth);
+        nestedRowAttachZoneWidth = Mathf.Max(0f, nestedRowAttachZoneWidth);
         nestedRowLateralTolerance = Mathf.Max(0f, nestedRowLateralTolerance);
         nestedRowAlignmentDot = Mathf.Clamp01(nestedRowAlignmentDot);
         nestedRowAttachDistance = Mathf.Max(0f, nestedRowAttachDistance);
+        nestedRowAttachOverlapAllowance = Mathf.Max(0f, nestedRowAttachOverlapAllowance);
         nestedRowDetachDistance = Mathf.Max(nestedRowAttachDistance, nestedRowDetachDistance);
         nestedRowStepDistance = Mathf.Max(0.01f, nestedRowStepDistance);
         nestedRowSlotSpacing = Mathf.Max(0f, nestedRowSlotSpacing);
@@ -43,6 +46,8 @@ public partial class CartController
         nestedRowPullForwardOffset = Mathf.Max(0f, nestedRowPullForwardOffset);
         nestedRowExtraCartWeight = Mathf.Max(0f, nestedRowExtraCartWeight);
         nestedRowCenterPivotBlend = Mathf.Clamp01(nestedRowCenterPivotBlend);
+        nestedRowGrabbedTurnSpeedMultiplier = Mathf.Clamp01(nestedRowGrabbedTurnSpeedMultiplier);
+        nestedRowGrabbedTurnSlowdownPerExtraCart = Mathf.Max(0f, nestedRowGrabbedTurnSlowdownPerExtraCart);
         nestedCollisionRefreshInterval = Mathf.Max(0.02f, nestedCollisionRefreshInterval);
         playerTipPushForce = Mathf.Max(0f, playerTipPushForce);
         playerTipPushSpeed = Mathf.Max(0f, playerTipPushSpeed);

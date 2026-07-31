@@ -25,7 +25,11 @@ public class PlayerCartHandleIK : MonoBehaviour
 
     private void Update()
     {
-        if (reachForNearbyCarts && Time.time >= nextSearchTime)
+        if (forcedCart != null)
+        {
+            nearbyCart = null;
+        }
+        else if (reachForNearbyCarts && Time.time >= nextSearchTime)
         {
             nearbyCart = FindNearestReachableCart();
             nextSearchTime = Time.time + cartSearchInterval;
@@ -81,11 +85,10 @@ public class PlayerCartHandleIK : MonoBehaviour
 
     private CartController FindNearestReachableCart()
     {
-        CartController[] carts = FindObjectsByType<CartController>(FindObjectsInactive.Exclude);
         CartController closestCart = null;
         float closestDistance = releaseDistance;
 
-        foreach (CartController candidate in carts)
+        foreach (CartController candidate in CartController.ActiveCarts)
         {
             if (candidate == null)
             {

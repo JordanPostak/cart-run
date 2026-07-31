@@ -1,6 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum CartRowEnd
+{
+    Back,
+    Front
+}
+
 public partial class CartController
 {
     public bool TryAttachCartAheadToRow()
@@ -11,6 +17,7 @@ public partial class CartController
         }
 
         CartController leader = rowLeader != null ? rowLeader : this;
+        leader.NormalizeRowState();
         CartController candidate = leader.FindAttachableCartAhead();
         if (candidate == null)
         {
@@ -18,9 +25,99 @@ public partial class CartController
             return false;
         }
 
-        leader.AttachCartToRow(candidate);
-        Debug.Log($"{nameof(CartController)} attached {candidate.name} to row led by {leader.name}.", leader);
-        return true;
+        if (leader.AttachCartToRow(candidate))
+        {
+            Debug.Log($"{nameof(CartController)} attached {candidate.name} to row led by {leader.name}.", leader);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryStealBackCartFromNearbyRow()
+    {
+        if (!enableNestedCartRows || isTipped)
+        {
+            return false;
+        }
+
+        CartController leader = rowLeader != null ? rowLeader : this;
+        leader.NormalizeRowState();
+        CartController sourceRow = leader.FindStealableRowByRearDockingZone();
+        if (sourceRow == null)
+        {
+            return false;
+        }
+
+        if (!sourceRow.TryDetachBackCartFromRow(out CartController stolenCart) || stolenCart == null)
+        {
+            return false;
+        }
+
+        if (leader.AttachCartToRow(stolenCart))
+        {
+            Debug.Log($"{nameof(CartController)} stole {stolenCart.name} from row led by {sourceRow.name} into row led by {leader.name}.", leader);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryDetachCartFromRowEnd(CartRowEnd rowEnd, out CartController detachedCart)
+    {
+        CartController leader = rowLeader != null ? rowLeader : this;
+        return leader.TryDetachCartFromRowEndAsLeader(rowEnd, out detachedCart);
+    }
+
+    public bool TryDetachFrontCartFromRow(out CartController detachedCart)
+    {
+        return TryDetachCartFromRowEnd(CartRowEnd.Front, out detachedCart);
+    }
+
+    public bool TryDetachBackCartFromRow(out CartController detachedCart)
+    {
+        return TryDetachCartFromRowEnd(CartRowEnd.Back, out detachedCart);
+    }
+
+    public bool TryAppendCartToRow(CartController cart)
+    {
+        CartController leader = rowLeader != null ? rowLeader : this;
+        leader.NormalizeRowState();
+        return leader.AttachCartToRow(cart);
+    }
+
+    public bool HasRowMembers()
+    {
+        CartController leader = rowLeader != null ? rowLeader : this;
+        leader.NormalizeRowState();
+        return leader.explicitRowCarts.Count > 0;
+    }
+
+    public CartController GetRowGrabLeader()
+    {
+        return rowLeader != null ? rowLeader : this;
+    }
+
+    private bool TryDetachCartFromRowEndAsLeader(CartRowEnd rowEnd, out CartController detachedCart)
+    {
+        detachedCart = null;
+        if (rowLeader != null && rowLeader != this)
+        {
+            return rowLeader.TryDetachCartFromRowEndAsLeader(rowEnd, out detachedCart);
+        }
+
+        NormalizeRowState();
+        if (explicitRowCarts.Count == 0)
+        {
+            return false;
+        }
+
+        if (rowEnd == CartRowEnd.Front)
+        {
+            return TryDetachFrontCartFromRowAsLeader(out detachedCart);
+        }
+
+        return TryDetachBackCartFromRowAsLeader(out detachedCart);
     }
 
     private CartController FindAttachableCartAhead()
@@ -29,11 +126,10 @@ public partial class CartController
         Vector3 rowForward = GetCartForward();
         Vector3 rowFrontPoint = GetFrontRowAttachPoint(row, rowForward);
         CartController closestCart = null;
-        float closestDistance = nestedRowScanDistance;
+        float closestScore = float.PositiveInfinity;
         int availableCartCount = 0;
 
-        CartController[] carts = FindObjectsByType<CartController>(FindObjectsInactive.Exclude);
-        foreach (CartController candidate in carts)
+        foreach (CartController candidate in ActiveCarts)
         {
             if (candidate == null || candidate == this || candidate.isTipped || candidate.rowLeader != null || row.Contains(candidate))
             {
@@ -42,22 +138,109 @@ public partial class CartController
 
             availableCartCount++;
 
-            float distance = candidate.GetClosestPlanarDistanceTo(rowFrontPoint);
-            if (distance > closestDistance)
+            if (!candidate.TryGetAttachZoneScoreForIncomingRow(rowFrontPoint, rowForward, out float score))
             {
                 continue;
             }
 
-            closestDistance = distance;
+            if (score >= closestScore)
+            {
+                continue;
+            }
+
+            closestScore = score;
             closestCart = candidate;
         }
 
         if (closestCart == null)
         {
-            Debug.Log($"{nameof(CartController)} on {name} saw {availableCartCount} available carts, but none were within {nestedRowScanDistance:0.00} of the row front.", this);
+            Debug.Log($"{nameof(CartController)} on {name} saw {availableCartCount} available carts, but none were inside the row attach zone behind the cart.", this);
         }
 
         return closestCart;
+    }
+
+    private CartController FindStealableRowByRearDockingZone()
+    {
+        List<CartController> row = GetExplicitRow();
+        Vector3 rowForward = GetCartForward();
+        Vector3 rowFrontPoint = GetFrontRowAttachPoint(row, rowForward);
+        CartController closestRow = null;
+        float closestScore = float.PositiveInfinity;
+        HashSet<CartController> checkedLeaders = new HashSet<CartController>();
+
+        foreach (CartController candidate in ActiveCarts)
+        {
+            if (candidate == null || candidate.isTipped || row.Contains(candidate))
+            {
+                continue;
+            }
+
+            CartController candidateLeader = candidate.GetRowGrabLeader();
+            if (candidateLeader == null || candidateLeader == this || candidateLeader == GetRowGrabLeader() || !checkedLeaders.Add(candidateLeader))
+            {
+                continue;
+            }
+
+            if (candidateLeader.IsGrabbed || !candidateLeader.HasRowMembers())
+            {
+                continue;
+            }
+
+            // Stealing uses the same docking pocket as normal row adding, but aimed at the
+            // source row's rear cart. That makes the player line up with the row before pulling.
+            if (!candidateLeader.TryGetAttachZoneScoreForIncomingRow(rowFrontPoint, rowForward, out float score))
+            {
+                continue;
+            }
+
+            if (score >= closestScore)
+            {
+                continue;
+            }
+
+            closestScore = score;
+            closestRow = candidateLeader;
+        }
+
+        return closestRow;
+    }
+
+    private bool TryGetAttachZoneScoreForIncomingRow(Vector3 incomingRowFrontPoint, Vector3 incomingRowForward, out float score)
+    {
+        score = float.PositiveInfinity;
+        Vector3 targetForward = GetCartForward();
+        // Docking should feel generous: rows can be a little crooked while the snap-to-row
+        // placement cleans up the final alignment.
+        float effectiveAlignmentDot = Mathf.Clamp01(nestedRowAlignmentDot - 0.18f);
+        if (Mathf.Abs(Vector3.Dot(targetForward, incomingRowForward)) < effectiveAlignmentDot)
+        {
+            return false;
+        }
+
+        Vector3 zoneOrigin = GetRearWheelCenter();
+        Vector3 zoneDirection = -targetForward;
+        Vector3 zoneRight = Vector3.Cross(Vector3.up, targetForward).normalized;
+        float halfWidth = Mathf.Max(nestedRowAttachZoneWidth * 0.5f, nestedRowLateralTolerance);
+        float attachReadyDepth = Mathf.Min(nestedRowAttachZoneDepth, Mathf.Max(nestedRowAttachDistance, nestedRowStepDistance));
+        Vector3 offset = Vector3.ProjectOnPlane(incomingRowFrontPoint - zoneOrigin, Vector3.up);
+        float forwardDistance = Vector3.Dot(offset, zoneDirection);
+
+        // Negative forward distance means the incoming cart/row has already overlapped the
+        // target's rear. Allow that, because the actual row layout intentionally nests carts.
+        if (forwardDistance < -nestedRowAttachOverlapAllowance || forwardDistance > attachReadyDepth)
+        {
+            return false;
+        }
+
+        float lateralDistance = Mathf.Abs(Vector3.Dot(offset, zoneRight));
+        if (lateralDistance > halfWidth)
+        {
+            return false;
+        }
+
+        score = Mathf.Abs(forwardDistance) + lateralDistance;
+        return true;
     }
 
     private float GetClosestPlanarDistanceTo(Vector3 targetPoint)
@@ -97,11 +280,17 @@ public partial class CartController
         return Mathf.Abs(Vector3.Dot(offset, rowRight));
     }
 
-    private void AttachCartToRow(CartController cart)
+    private bool AttachCartToRow(CartController cart)
     {
         if (cart == null || cart == this || explicitRowCarts.Contains(cart))
         {
-            return;
+            return false;
+        }
+
+        cart.NormalizeRowState();
+        if (cart.rowLeader != null || cart.explicitRowCarts.Count > 0 || cart.rowObject != null)
+        {
+            return false;
         }
 
         EnsureRowObject();
@@ -144,6 +333,9 @@ public partial class CartController
                 }
             }
         }
+
+        NormalizeRowState();
+        return true;
     }
 
     private void EnsureRowObject()
@@ -345,6 +537,7 @@ public partial class CartController
             return rowLeader.GetExplicitRow();
         }
 
+        NormalizeRowState();
         List<CartController> row = new List<CartController> { this };
         for (int i = 0; i < explicitRowCarts.Count; i++)
         {
@@ -367,6 +560,185 @@ public partial class CartController
         {
             DetachCartFromRow(explicitRowCarts[i]);
             explicitRowCarts.RemoveAt(i);
+        }
+
+        CleanupEmptyRowObject();
+    }
+
+    private bool TryDetachFrontCartFromRowAsLeader(out CartController detachedCart)
+    {
+        detachedCart = explicitRowCarts[explicitRowCarts.Count - 1];
+        DetachCartFromRow(detachedCart);
+        explicitRowCarts.RemoveAt(explicitRowCarts.Count - 1);
+        RefreshRowAfterEndDetach();
+        return detachedCart != null;
+    }
+
+    private bool TryDetachBackCartFromRowAsLeader(out CartController detachedCart)
+    {
+        detachedCart = this;
+        GameObject previousRowObject = rowObject;
+        List<CartController> remainingRow = new List<CartController>(explicitRowCarts);
+
+        foreach (CartController rowCart in remainingRow)
+        {
+            DetachCartFromRow(rowCart);
+        }
+
+        explicitRowCarts.Clear();
+        RestoreNestedCartCollisions();
+        transform.SetParent(originalParent, true);
+        rowObject = null;
+
+        DestroyRowObject(previousRowObject);
+        RebuildRowFromDetachedMembers(remainingRow);
+        IgnoreFormerRowCollisionsUntilSeparated(remainingRow);
+        return true;
+    }
+
+    private void RebuildRowFromDetachedMembers(List<CartController> rowMembers)
+    {
+        if (rowMembers == null || rowMembers.Count == 0)
+        {
+            return;
+        }
+
+        CartController newLeader = rowMembers[0];
+        if (newLeader == null)
+        {
+            return;
+        }
+
+        if (rowMembers.Count == 1)
+        {
+            newLeader.RestoreStandaloneRowState();
+            return;
+        }
+
+        newLeader.EnsureRowObject();
+        for (int i = 1; i < rowMembers.Count; i++)
+        {
+            CartController rowMember = rowMembers[i];
+            if (rowMember != null)
+            {
+                newLeader.AttachCartToRow(rowMember);
+            }
+        }
+
+        newLeader.NormalizeRowState();
+    }
+
+    private void RefreshRowAfterEndDetach()
+    {
+        RestoreNestedCartCollisions();
+        if (explicitRowCarts.Count > 0)
+        {
+            RebuildRowLayout(GetExplicitRow());
+            return;
+        }
+
+        CleanupEmptyRowObject();
+    }
+
+    private void CleanupEmptyRowObject()
+    {
+        if (explicitRowCarts.Count > 0 || rowObject == null)
+        {
+            return;
+        }
+
+        GameObject emptyRowObject = rowObject;
+        transform.SetParent(originalParent, true);
+        rowObject = null;
+        DestroyRowObject(emptyRowObject);
+    }
+
+    private void RestoreStandaloneRowState()
+    {
+        RestoreNestedCartCollisions();
+        rowLeader = null;
+        explicitRowCarts.Clear();
+
+        if (rowObject != null)
+        {
+            GameObject staleRowObject = rowObject;
+            transform.SetParent(originalParent, true);
+            rowObject = null;
+            DestroyRowObject(staleRowObject);
+        }
+        else
+        {
+            transform.SetParent(originalParent, true);
+        }
+    }
+
+    private void NormalizeRowState()
+    {
+        if (rowLeader != null && rowLeader != this)
+        {
+            return;
+        }
+
+        for (int i = explicitRowCarts.Count - 1; i >= 0; i--)
+        {
+            CartController rowCart = explicitRowCarts[i];
+            if (rowCart == null || rowCart == this || explicitRowCarts.IndexOf(rowCart) != i)
+            {
+                explicitRowCarts.RemoveAt(i);
+                continue;
+            }
+
+            if (rowCart.rowLeader != null && rowCart.rowLeader != this)
+            {
+                explicitRowCarts.RemoveAt(i);
+                continue;
+            }
+
+            if (rowCart.explicitRowCarts.Count > 0)
+            {
+                explicitRowCarts.RemoveAt(i);
+                continue;
+            }
+
+            rowCart.rowLeader = this;
+            rowCart.rowObject = rowObject;
+        }
+
+        if (explicitRowCarts.Count == 0)
+        {
+            RestoreStandaloneRowState();
+            return;
+        }
+
+        EnsureRowObject();
+        foreach (CartController rowCart in explicitRowCarts)
+        {
+            if (rowCart == null)
+            {
+                continue;
+            }
+
+            rowCart.rowLeader = this;
+            rowCart.rowObject = rowObject;
+        }
+    }
+
+    private void DestroyRowObject(GameObject rowObjectToDestroy)
+    {
+        if (rowObjectToDestroy == null)
+        {
+            return;
+        }
+
+        // Row objects are temporary runtime grouping transforms. Once a row has fewer than two
+        // carts, remove the grouping so the remaining cart behaves like a normal standalone cart.
+        if (Application.isPlaying)
+        {
+            Destroy(rowObjectToDestroy);
+        }
+        else
+        {
+            DestroyImmediate(rowObjectToDestroy);
         }
     }
 

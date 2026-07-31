@@ -276,19 +276,22 @@ namespace StarterAssets
             // if there is a move input rotate player when the player is moving
             if (moveInput != Vector2.zero)
             {
-                _targetRotation = usingMouseDirection
+                float desiredTargetRotation = usingMouseDirection
                     ? Mathf.Atan2(mouseDirection.x, mouseDirection.z) * Mathf.Rad2Deg
                     : Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.eulerAngles.y;
 
+                _targetRotation = desiredTargetRotation;
+                float effectiveRotationSmoothTime = GetEffectiveRotationSmoothTime();
                 float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, _targetRotation, ref _rotationVelocity,
-                    RotationSmoothTime);
+                    effectiveRotationSmoothTime);
 
                 // rotate to face input direction relative to camera position
                 transform.rotation = Quaternion.Euler(0.0f, rotation, 0.0f);
             }
 
 
-            Vector3 targetDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * Vector3.forward;
+            float movementYaw = IsPushingCartRow() ? transform.eulerAngles.y : _targetRotation;
+            Vector3 targetDirection = Quaternion.Euler(0.0f, movementYaw, 0.0f) * Vector3.forward;
 
             // move the player
             _controller.Move(targetDirection.normalized * (_speed * Time.deltaTime) +
@@ -300,6 +303,22 @@ namespace StarterAssets
                 _animator.SetFloat(_animIDSpeed, _animationBlend);
                 _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
             }
+        }
+
+        private float GetEffectiveRotationSmoothTime()
+        {
+            if (!IsPushingCartRow())
+            {
+                return RotationSmoothTime;
+            }
+
+            float rowTurnResponse = Mathf.Max(0.05f, _cartPushController.GetPushedCartRowTurnResponseMultiplier());
+            return RotationSmoothTime / rowTurnResponse;
+        }
+
+        private bool IsPushingCartRow()
+        {
+            return _cartPushController != null && _cartPushController.IsPushingCartRow;
         }
 
         private void UpdateMouseClickRunState()

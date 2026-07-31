@@ -4,6 +4,8 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public partial class CartController : MonoBehaviour
 {
+    private static readonly List<CartController> activeCarts = new List<CartController>();
+
     [Header("Rigidbody Setup")]
     [SerializeField] private bool configureRigidbodyOnAwake = true;
     [SerializeField] private float cartMass = 35f;
@@ -48,9 +50,12 @@ public partial class CartController : MonoBehaviour
     [Header("Nested Cart Rows")]
     [SerializeField] private bool enableNestedCartRows = true;
     [SerializeField] private float nestedRowScanDistance = 2f;
+    [SerializeField] private float nestedRowAttachZoneDepth = 10f;
+    [SerializeField] private float nestedRowAttachZoneWidth = 2f;
     [SerializeField] private float nestedRowLateralTolerance = 0.9f;
     [SerializeField] private float nestedRowAlignmentDot = 0.82f;
     [SerializeField] private float nestedRowAttachDistance = 0.25f;
+    [SerializeField] private float nestedRowAttachOverlapAllowance = 1.25f;
     [SerializeField] private float nestedRowDetachDistance = 0.25f;
     [SerializeField] private bool pullNestedCartIntoPlace = true;
     [SerializeField] private float nestedRowStepDistance = 0.38f;
@@ -59,6 +64,8 @@ public partial class CartController : MonoBehaviour
     [SerializeField] private float nestedRowPullForwardOffset = 0.55f;
     [SerializeField] private float nestedRowExtraCartWeight = 0.8f;
     [SerializeField] private float nestedRowCenterPivotBlend = 1f;
+    [SerializeField] private float nestedRowGrabbedTurnSpeedMultiplier = 0.35f;
+    [SerializeField] private float nestedRowGrabbedTurnSlowdownPerExtraCart = 0.35f;
     [SerializeField] private bool ignoreNestedCartCollisions = true;
     [SerializeField] private float nestedCollisionRefreshInterval = 0.25f;
 
@@ -125,10 +132,12 @@ public partial class CartController : MonoBehaviour
     private Quaternion rowCartLocalRotation = Quaternion.identity;
     private readonly List<CartController> explicitRowCarts = new List<CartController>();
     private readonly List<CartController> ignoredNestedCollisionCarts = new List<CartController>();
+    private readonly List<CartController> detachedRowCollisionCarts = new List<CartController>();
     private float nextNestedCollisionRefreshTime;
 
     public bool IsTipped => isTipped;
-    public bool IsGrabbed => grabbedPlayer != null;
+    public bool IsGrabbed => GetRowGrabLeader().grabbedPlayer != null;
+    public static IReadOnlyList<CartController> ActiveCarts => activeCarts;
 
     private void Awake()
     {
@@ -198,8 +207,17 @@ public partial class CartController : MonoBehaviour
         rearWheelBaseRotations = CartTransformUtility.CacheLocalRotations(rearWheelPivots);
     }
 
+    private void OnEnable()
+    {
+        if (!activeCarts.Contains(this))
+        {
+            activeCarts.Add(this);
+        }
+    }
+
     private void OnDisable()
     {
+        activeCarts.Remove(this);
         RestoreNestedCartCollisions();
     }
 
@@ -224,6 +242,8 @@ public partial class CartController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        UpdateDetachedRowCollisionIgnores();
+
         if (rowLeader != null && rowLeader != this)
         {
             forwardRollMomentum = 0f;

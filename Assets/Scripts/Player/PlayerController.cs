@@ -9,6 +9,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float capsuleHeight = 1.8f;
     [SerializeField] private float capsuleRadius = 0.35f;
     [SerializeField] private Vector3 capsuleCenter = new Vector3(0f, 0.9f, 0f);
+    [SerializeField] private bool disableRootCapsuleWithNestedMovementController = true;
     [SerializeField] private LayerMask movementCollisionMask = -1;
     [SerializeField] private float pushForce = 190f;
     [SerializeField] private float skinWidth = 0.04f;
@@ -22,6 +23,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private bool quickLeftClickReleasesCart = true;
     [SerializeField] private float leftClickReleaseMaxHoldTime = 0.18f;
     [SerializeField] private float rightClickReleaseDoubleClickWindow = 0.35f;
+    [SerializeField] private bool enableGrabbedCartRowDetachKey = true;
+    [SerializeField] private KeyCode detachGrabbedCartFromRowKey = KeyCode.Q;
     [SerializeField] private float mouseControlStopDistance = 0.35f;
     [SerializeField] private float mouseControlFullSpeedDistance = 2.4f;
     [SerializeField] private float mouseControlInputLerpSpeed = 10f;
@@ -47,6 +50,12 @@ public class PlayerController : MonoBehaviour
     private Behaviour[] disabledGrabPushBehaviours;
 
     public bool IsPushingCart => grabbedCart != null;
+    public bool IsPushingCartRow => grabbedCart != null && grabbedCart.HasRowMembers();
+
+    public float GetPushedCartRowTurnResponseMultiplier()
+    {
+        return grabbedCart != null ? grabbedCart.GetGrabbedRowTurnResponseMultiplier() : 1f;
+    }
 
     private void Awake()
     {
@@ -73,12 +82,21 @@ public class PlayerController : MonoBehaviour
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
         rb.constraints = RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
 
+        CacheVisualRoot();
+        ConfigureRootCapsule();
+        playerColliders = GetComponentsInChildren<Collider>();
+    }
+
+    private void ConfigureRootCapsule()
+    {
         capsule.height = capsuleHeight;
         capsule.radius = capsuleRadius;
         capsule.center = capsuleCenter;
         capsule.isTrigger = false;
-        playerColliders = GetComponentsInChildren<Collider>();
-        CacheVisualRoot();
+
+        // Starter Assets uses a CharacterController on the nested armature. When that controller
+        // is active, the root capsule should not stay behind as an invisible blocker.
+        capsule.enabled = !useNestedMovementController || !disableRootCapsuleWithNestedMovementController;
     }
 
     private void Update()
@@ -106,12 +124,14 @@ public class PlayerController : MonoBehaviour
             HandleRightClickCartAction();
         }
 
+        HandleGrabbedCartRowDetachInput();
+
         if (Input.GetMouseButtonDown(0))
         {
             leftMouseDownTime = Time.time;
         }
 
-        if (quickLeftClickReleasesCart && grabbedCart != null && Input.GetMouseButtonUp(0) && Time.time - leftMouseDownTime <= leftClickReleaseMaxHoldTime)
+        if (ShouldReleaseCartFromQuickLeftClick())
         {
             grabbedCart.ReleaseGrab(this);
         }
@@ -340,8 +360,7 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        CartController[] carts = FindObjectsByType<CartController>(FindObjectsInactive.Exclude);
-        foreach (CartController cart in carts)
+        foreach (CartController cart in CartController.ActiveCarts)
         {
             if (cart == null || cart.IsGrabbed || !cart.CanGrabFrom(GetGrabberPosition()))
             {
@@ -350,7 +369,6 @@ public class PlayerController : MonoBehaviour
 
             if (cart.TryGrab(this))
             {
-                grabbedCart = cart;
                 return true;
             }
         }
@@ -362,6 +380,14 @@ public class PlayerController : MonoBehaviour
     {
         if (grabbedCart != null)
         {
+            CartController cartToRelease = grabbedCart;
+            if (TryFindClosestGrabbableCart(out CartController nextCart, cartToRelease.GetRowGrabLeader()))
+            {
+                cartToRelease.ReleaseGrab(this);
+                nextCart.TryGrab(this);
+                return;
+            }
+
             grabbedCart.ReleaseGrab(this);
             return;
         }
@@ -386,19 +412,52 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (grabbedCart.TryStealBackCartFromNearbyRow())
+        {
+            return;
+        }
+
         grabbedCart.TryAttachCartAheadToRow();
+    }
+
+    private void HandleGrabbedCartRowDetachInput()
+    {
+        if (!enableGrabbedCartRowDetachKey || grabbedCart == null || !Input.GetKeyDown(detachGrabbedCartFromRowKey))
+        {
+            return;
+        }
+
+        // Q only splits one cart from the row the player is currently holding.
+        // It does not pull carts from nearby rows; that keeps row stealing as a later explicit action.
+        CartController grabbedLeader = grabbedCart.GetRowGrabLeader();
+        if (!grabbedLeader.TryDetachBackCartFromRow(out CartController detachedCart) || detachedCart == null)
+        {
+            return;
+        }
+
+        if (detachedCart == grabbedCart)
+        {
+            return;
+        }
+
+        grabbedLeader.ReleaseGrab(this);
+        detachedCart.TryGrab(this);
     }
 
     private bool TryGrabClosestCart()
     {
-        CartController[] carts = FindObjectsByType<CartController>(FindObjectsInactive.Exclude);
-        CartController closestCart = null;
+        return TryFindClosestGrabbableCart(out CartController closestCart) && closestCart.TryGrab(this);
+    }
+
+    private bool TryFindClosestGrabbableCart(out CartController closestCart, CartController excludedGrabLeader = null)
+    {
+        closestCart = null;
         float closestDistance = handleGrabSearchRadius;
         Vector3 grabberPosition = GetGrabberPosition();
 
-        foreach (CartController cart in carts)
+        foreach (CartController cart in CartController.ActiveCarts)
         {
-            if (cart == null || cart.IsGrabbed || !cart.CanGrabFrom(grabberPosition))
+            if (cart == null || cart.GetRowGrabLeader() == excludedGrabLeader || cart.IsGrabbed || !cart.CanGrabFrom(grabberPosition))
             {
                 continue;
             }
@@ -411,7 +470,24 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        return closestCart != null && closestCart.TryGrab(this);
+        return closestCart != null;
+    }
+
+    private bool ShouldReleaseCartFromQuickLeftClick()
+    {
+        if (!quickLeftClickReleasesCart || grabbedCart == null || !Input.GetMouseButtonUp(0))
+        {
+            return false;
+        }
+
+        // Left mouse is also used for click-to-move and double-click run while pushing carts.
+        // Keep cart release on the explicit grab controls in that mode so running never drops the handle.
+        if (mouseControlsGrabbedCart)
+        {
+            return false;
+        }
+
+        return Time.time - leftMouseDownTime <= leftClickReleaseMaxHoldTime;
     }
 
     private Vector3 GetDesiredMovementInput()
@@ -503,7 +579,6 @@ public class PlayerController : MonoBehaviour
         {
             if (enableCartGrab && cart.TryGrab(this))
             {
-                grabbedCart = cart;
                 return Vector3.zero;
             }
 

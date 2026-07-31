@@ -5,6 +5,12 @@ public partial class CartController
 {
     public bool TryGrab(PlayerController player)
     {
+        CartController grabLeader = GetRowGrabLeader();
+        if (grabLeader != this)
+        {
+            return grabLeader.TryGrab(player);
+        }
+
         if (player == null || isTipped || grabbedPlayer != null || !IsPlayerOnHandleSide(player.GetGrabberPosition()))
         {
             return false;
@@ -28,12 +34,13 @@ public partial class CartController
 
     public bool CanGrabFrom(Vector3 playerPosition)
     {
-        return !isTipped && IsPlayerOnHandleSide(playerPosition);
+        CartController grabLeader = GetRowGrabLeader();
+        return !grabLeader.isTipped && grabLeader.IsPlayerOnHandleSide(playerPosition);
     }
 
     public Vector3 GetCartGrabPointWorldPosition()
     {
-        return GetCartGrabPointPosition();
+        return GetRowGrabLeader().GetCartGrabPointPosition();
     }
 
     public void ReleaseGrab(PlayerController player)
@@ -111,9 +118,11 @@ public partial class CartController
     private void ApplyRowGrabberFollowTarget(List<CartController> row, Vector3 nextLeaderPosition, Quaternion nextLeaderRotation)
     {
         Vector3 rowCenter = GetExplicitRowCenter(row);
-        Quaternion deltaRotation = nextLeaderRotation * Quaternion.Inverse(rb.rotation);
-        Vector3 rotatedLeaderPosition = rowCenter + deltaRotation * (rb.position - rowCenter);
-        Vector3 deltaPosition = nextLeaderPosition - rotatedLeaderPosition;
+        Quaternion deltaRotation = GetRowCenterHandleDeltaRotation(rowCenter, row.Count);
+        Vector3 rotatedGrabPoint = rowCenter + deltaRotation * (GetCartGrabPointPosition() - rowCenter);
+        Vector3 targetGrabPoint = grabberFollowPosition;
+        targetGrabPoint.y = rotatedGrabPoint.y;
+        Vector3 deltaPosition = targetGrabPoint - rotatedGrabPoint;
 
         foreach (CartController cart in row)
         {
@@ -148,6 +157,38 @@ public partial class CartController
 
         UpdateRowTransform(row);
         RebuildRowLayout(row);
+        UpdateGrabbedPlayerPose(rb.position, rb.rotation);
+    }
+
+    private Quaternion GetRowCenterHandleDeltaRotation(Vector3 rowCenter, int rowCount)
+    {
+        Vector3 currentHandleOffset = Vector3.ProjectOnPlane(GetCartGrabPointPosition() - rowCenter, Vector3.up);
+        Vector3 targetHandleOffset = Vector3.ProjectOnPlane(grabberFollowPosition - rowCenter, Vector3.up);
+        if (currentHandleOffset.sqrMagnitude < 0.001f || targetHandleOffset.sqrMagnitude < 0.001f)
+        {
+            return Quaternion.identity;
+        }
+
+        // A row turns when the player moves the rear handle around the row center. This preserves
+        // the Starter player movement while making the row read like a longer, center-pivoting body.
+        float targetTurn = Vector3.SignedAngle(currentHandleOffset, targetHandleOffset, Vector3.up);
+        float rowTurnMultiplier = GetGrabbedRowTurnMultiplier(rowCount);
+        float maxTurn = grabbedTurnSpeed * rowTurnMultiplier * Time.fixedDeltaTime;
+        float turnStep = Mathf.Clamp(targetTurn, -maxTurn, maxTurn);
+        return Quaternion.AngleAxis(turnStep, Vector3.up);
+    }
+
+    private float GetGrabbedRowTurnMultiplier(int rowCount)
+    {
+        int extraCartCount = Mathf.Max(0, rowCount - 1);
+        float slowdown = 1f + extraCartCount * nestedRowGrabbedTurnSlowdownPerExtraCart;
+        return slowdown > 0f ? nestedRowGrabbedTurnSpeedMultiplier / slowdown : nestedRowGrabbedTurnSpeedMultiplier;
+    }
+
+    public float GetGrabbedRowTurnResponseMultiplier()
+    {
+        List<CartController> row = GetExplicitRow();
+        return row.Count > 1 ? GetGrabbedRowTurnMultiplier(row.Count) : 1f;
     }
 
     public Vector3 GetPlayerGrabPosition()
