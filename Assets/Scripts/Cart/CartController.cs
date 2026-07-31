@@ -51,12 +51,12 @@ public class CartController : MonoBehaviour
     [SerializeField] private float nestedRowLateralTolerance = 0.9f;
     [SerializeField] private float nestedRowAlignmentDot = 0.82f;
     [SerializeField] private float nestedRowAttachDistance = 0.25f;
-    [SerializeField] private float nestedRowDetachDistance = 0.15f;
+    [SerializeField] private float nestedRowDetachDistance = 0.25f;
     [SerializeField] private bool pullNestedCartIntoPlace = true;
-    [SerializeField] private float nestedRowStepDistance = 0.05f;
-    [SerializeField] private float nestedRowSlotSpacing = 0.05f;
+    [SerializeField] private float nestedRowStepDistance = 0.38f;
+    [SerializeField] private float nestedRowSlotSpacing = 0.28f;
     [SerializeField] private float nestedRowOverlapDistance = 1.25f;
-    [SerializeField] private float nestedRowPullForwardOffset = 0.05f;
+    [SerializeField] private float nestedRowPullForwardOffset = 0.55f;
     [SerializeField] private float nestedRowExtraCartWeight = 0.8f;
     [SerializeField] private float nestedRowCenterPivotBlend = 1f;
     [SerializeField] private bool ignoreNestedCartCollisions = true;
