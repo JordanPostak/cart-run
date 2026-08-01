@@ -117,12 +117,18 @@ public partial class CartController
 
     private void ApplyRowGrabberFollowTarget(List<CartController> row, Vector3 nextLeaderPosition, Quaternion nextLeaderRotation)
     {
+        // The visual row aim below can temporarily rotate the whole row for presentation.
+        // Reset to the authored row layout before doing real steering so that visual offset
+        // never feeds back into physics or row-center math on the next frame.
+        RebuildRowLayout(row);
+
         Vector3 rowCenter = GetExplicitRowCenter(row);
         Quaternion deltaRotation = GetRowCenterHandleDeltaRotation(rowCenter, row.Count);
         Vector3 rotatedGrabPoint = rowCenter + deltaRotation * (GetCartGrabPointPosition() - rowCenter);
         Vector3 targetGrabPoint = grabberFollowPosition;
         targetGrabPoint.y = rotatedGrabPoint.y;
         Vector3 deltaPosition = targetGrabPoint - rotatedGrabPoint;
+        LimitRowMotionByCollision(row, rowCenter, ref deltaRotation, ref deltaPosition);
 
         foreach (CartController cart in row)
         {
@@ -157,7 +163,64 @@ public partial class CartController
 
         UpdateRowTransform(row);
         RebuildRowLayout(row);
+        ApplyGrabbedRowVisualAim(row);
         UpdateGrabbedPlayerPose(rb.position, rb.rotation);
+    }
+
+    private void ApplyGrabbedRowVisualAim(List<CartController> row)
+    {
+        if (row == null || row.Count <= 1 || nestedRowVisualAimMaxYaw <= 0f)
+        {
+            currentNestedRowVisualAimYaw = Mathf.MoveTowards(currentNestedRowVisualAimYaw, 0f, nestedRowVisualAimResponse * Time.fixedDeltaTime);
+            return;
+        }
+
+        Vector3 steerDirection = new Vector3(grabbedInput.x, 0f, grabbedInput.y);
+        float targetYaw = 0f;
+        if (steerDirection.sqrMagnitude > 0.001f)
+        {
+            Vector3 rowForward = GetCartForward();
+            targetYaw = Mathf.Clamp(Vector3.SignedAngle(rowForward, steerDirection.normalized, Vector3.up), -nestedRowVisualAimMaxYaw, nestedRowVisualAimMaxYaw);
+        }
+
+        currentNestedRowVisualAimYaw = Mathf.Lerp(currentNestedRowVisualAimYaw, targetYaw, 1f - Mathf.Exp(-nestedRowVisualAimResponse * Time.fixedDeltaTime));
+        Vector3 grabPointPivot = GetCartGrabPointPosition();
+        Quaternion visualOffset = Quaternion.AngleAxis(currentNestedRowVisualAimYaw, Vector3.up);
+        Vector3 visualDeltaPosition = Vector3.zero;
+        LimitRowMotionByCollision(row, grabPointPivot, ref visualOffset, ref visualDeltaPosition);
+        currentNestedRowVisualAimYaw = Mathf.DeltaAngle(0f, visualOffset.eulerAngles.y);
+
+        for (int i = 0; i < row.Count; i++)
+        {
+            CartController cart = row[i];
+            if (cart == null || cart.isTipped)
+            {
+                continue;
+            }
+
+            // Rotate the row as one stiff visual piece around the real cart grab point. This
+            // presentation offset is reset before the next steering step, so it does not become
+            // part of the row's actual movement.
+            Vector3 visualPosition = grabPointPivot + visualOffset * (cart.rb.position - grabPointPivot) + visualDeltaPosition;
+            visualPosition.y = cart.plantedY;
+            Quaternion visualRotation = visualOffset * cart.rb.rotation;
+            Vector3 euler = visualRotation.eulerAngles;
+            Quaternion uprightRotation = Quaternion.Euler(0f, euler.y, 0f);
+
+            if (cart.rb.isKinematic)
+            {
+                cart.rb.position = visualPosition;
+                cart.rb.rotation = uprightRotation;
+            }
+            else
+            {
+                cart.rb.MovePosition(visualPosition);
+                cart.rb.MoveRotation(uprightRotation);
+            }
+
+            cart.transform.position = visualPosition;
+            cart.transform.rotation = uprightRotation;
+        }
     }
 
     private Quaternion GetRowCenterHandleDeltaRotation(Vector3 rowCenter, int rowCount)
@@ -231,7 +294,7 @@ public partial class CartController
         }
 
         Quaternion fromCurrentToTarget = cartRotation * Quaternion.Inverse(transform.rotation);
-        Vector3 currentWorldOffset = cartGrabPoint.position - rb.position;
+        Vector3 currentWorldOffset = GetCartGrabPointPosition() - rb.position;
         return fromCurrentToTarget * currentWorldOffset;
     }
 
@@ -372,9 +435,7 @@ public partial class CartController
 
     private void UpdateGrabbedPlayerPose(Vector3 handlePosition, Vector3 playerSide, Quaternion cartRotation)
     {
-        Vector3 sideStep = (cartRotation * Vector3.right) * (grabbedInput.x * playerTurnSideStep);
-
-        currentGrabbedPlayerPosition = handlePosition + playerSide * playerHandleSpacing + sideStep;
+        currentGrabbedPlayerPosition = handlePosition + playerSide * playerHandleSpacing;
         currentGrabbedPlayerPosition.y = plantedY;
 
         Vector3 cartDirection = handlePosition - currentGrabbedPlayerPosition;

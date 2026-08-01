@@ -3,6 +3,99 @@ using UnityEngine;
 
 public partial class CartController
 {
+    private void LimitRowMotionByCollision(List<CartController> row, Vector3 pivot, ref Quaternion deltaRotation, ref Vector3 deltaPosition)
+    {
+        if (!blockRowMovementOnCollision || row == null || row.Count == 0)
+        {
+            return;
+        }
+
+        float allowedFraction = 1f;
+        for (int i = 0; i < row.Count; i++)
+        {
+            CartController cart = row[i];
+            if (cart == null || cart.isTipped || cart.rb == null)
+            {
+                continue;
+            }
+
+            Vector3 targetPosition = pivot + deltaRotation * (cart.rb.position - pivot) + deltaPosition;
+            targetPosition.y = cart.plantedY;
+            Vector3 displacement = targetPosition - cart.rb.position;
+            float distance = displacement.magnitude;
+            if (distance < 0.001f)
+            {
+                continue;
+            }
+
+            float blockerDistance = GetNearestRowMotionBlockerDistance(cart, row, displacement / distance, distance + rowCollisionSkin);
+            if (blockerDistance < 0f)
+            {
+                continue;
+            }
+
+            allowedFraction = Mathf.Min(allowedFraction, Mathf.Clamp01((blockerDistance - rowCollisionSkin) / distance));
+            if (allowedFraction <= 0f)
+            {
+                break;
+            }
+        }
+
+        if (allowedFraction >= 0.999f)
+        {
+            return;
+        }
+
+        deltaPosition *= allowedFraction;
+        deltaRotation = Quaternion.Slerp(Quaternion.identity, deltaRotation, allowedFraction);
+    }
+
+    private float GetNearestRowMotionBlockerDistance(CartController cart, List<CartController> row, Vector3 direction, float distance)
+    {
+        RaycastHit[] hits = cart.rb.SweepTestAll(direction, distance, QueryTriggerInteraction.Ignore);
+        float nearestDistance = -1f;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider hitCollider = hits[i].collider;
+            if (!IsRowMotionBlocker(hitCollider, row))
+            {
+                continue;
+            }
+
+            if (nearestDistance < 0f || hits[i].distance < nearestDistance)
+            {
+                nearestDistance = hits[i].distance;
+            }
+        }
+
+        return nearestDistance;
+    }
+
+    private bool IsRowMotionBlocker(Collider hitCollider, List<CartController> row)
+    {
+        if (hitCollider == null || hitCollider.isTrigger)
+        {
+            return false;
+        }
+
+        CartController hitCart = hitCollider.attachedRigidbody != null
+            ? hitCollider.attachedRigidbody.GetComponent<CartController>()
+            : hitCollider.GetComponentInParent<CartController>();
+        if (hitCart != null && row.Contains(hitCart))
+        {
+            return false;
+        }
+
+        // The player is intentionally attached to the rear handle while steering a row, so
+        // player colliders should not be treated as world obstacles for the row sweep.
+        if (hitCollider.GetComponentInParent<PlayerController>() != null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private void UpdateNestedCartCollisionIgnores()
     {
         if (!ignoreNestedCartCollisions)

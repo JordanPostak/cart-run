@@ -66,6 +66,10 @@ public partial class CartController : MonoBehaviour
     [SerializeField] private float nestedRowCenterPivotBlend = 1f;
     [SerializeField] private float nestedRowGrabbedTurnSpeedMultiplier = 0.35f;
     [SerializeField] private float nestedRowGrabbedTurnSlowdownPerExtraCart = 0.35f;
+    [SerializeField] private float nestedRowVisualAimMaxYaw = 28f;
+    [SerializeField] private float nestedRowVisualAimResponse = 8f;
+    [SerializeField] private bool blockRowMovementOnCollision = true;
+    [SerializeField] private float rowCollisionSkin = 0.03f;
     [SerializeField] private bool ignoreNestedCartCollisions = true;
     [SerializeField] private float nestedCollisionRefreshInterval = 0.25f;
 
@@ -134,6 +138,7 @@ public partial class CartController : MonoBehaviour
     private readonly List<CartController> ignoredNestedCollisionCarts = new List<CartController>();
     private readonly List<CartController> detachedRowCollisionCarts = new List<CartController>();
     private float nextNestedCollisionRefreshTime;
+    private float currentNestedRowVisualAimYaw;
 
     public bool IsTipped => isTipped;
     public bool IsGrabbed => GetRowGrabLeader().grabbedPlayer != null;

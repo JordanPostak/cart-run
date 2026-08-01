@@ -188,6 +188,8 @@ public partial class CartController
 
     private void ApplyRowMotion(List<CartController> row, Vector3 pivot, Quaternion deltaRotation, Vector3 deltaPosition, Vector3 velocityDirection, float velocityBlend)
     {
+        LimitRowMotionByCollision(row, pivot, ref deltaRotation, ref deltaPosition);
+
         foreach (CartController cart in row)
         {
             if (cart == null || cart.isTipped)

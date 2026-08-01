@@ -48,6 +48,9 @@ public partial class CartController
         nestedRowCenterPivotBlend = Mathf.Clamp01(nestedRowCenterPivotBlend);
         nestedRowGrabbedTurnSpeedMultiplier = Mathf.Clamp01(nestedRowGrabbedTurnSpeedMultiplier);
         nestedRowGrabbedTurnSlowdownPerExtraCart = Mathf.Max(0f, nestedRowGrabbedTurnSlowdownPerExtraCart);
+        nestedRowVisualAimMaxYaw = Mathf.Clamp(nestedRowVisualAimMaxYaw, 0f, 60f);
+        nestedRowVisualAimResponse = Mathf.Max(0f, nestedRowVisualAimResponse);
+        rowCollisionSkin = Mathf.Max(0f, rowCollisionSkin);
         nestedCollisionRefreshInterval = Mathf.Max(0.02f, nestedCollisionRefreshInterval);
         playerTipPushForce = Mathf.Max(0f, playerTipPushForce);
         playerTipPushSpeed = Mathf.Max(0f, playerTipPushSpeed);
