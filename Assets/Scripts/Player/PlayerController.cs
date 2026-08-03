@@ -20,7 +20,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float grabbedInputDeadZone = 0.12f;
     [SerializeField] private bool mouseControlsGrabbedCart = true;
     [SerializeField] private bool rightClickTogglesCartGrab = true;
-    [SerializeField] private bool quickLeftClickReleasesCart = true;
+    [SerializeField] private bool quickLeftClickReleasesCart = false;
+    [SerializeField] private bool ignoreGrabbedCartCollisions = false;
     [SerializeField] private float leftClickReleaseMaxHoldTime = 0.18f;
     [SerializeField] private float rightClickReleaseDoubleClickWindow = 0.35f;
     [SerializeField] private bool enableGrabbedCartRowDetachKey = true;
@@ -182,14 +183,17 @@ public class PlayerController : MonoBehaviour
         RestoreIgnoredCartCollisions();
         DisableGrabPushBehaviours();
         grabbedCart = cart;
-        ignoredCartColliders = cart.GetComponentsInChildren<Collider>();
-        foreach (Collider playerCollider in playerColliders)
+        if (ignoreGrabbedCartCollisions)
         {
-            foreach (Collider cartCollider in ignoredCartColliders)
+            ignoredCartColliders = cart.GetComponentsInChildren<Collider>();
+            foreach (Collider playerCollider in playerColliders)
             {
-                if (playerCollider != null && cartCollider != null)
+                foreach (Collider cartCollider in ignoredCartColliders)
                 {
-                    Physics.IgnoreCollision(playerCollider, cartCollider, true);
+                    if (playerCollider != null && cartCollider != null)
+                    {
+                        Physics.IgnoreCollision(playerCollider, cartCollider, true);
+                    }
                 }
             }
         }

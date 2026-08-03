@@ -83,6 +83,7 @@ namespace StarterAssets
         public float MouseMoveStopDistance = 0.35f;
         public float MouseMoveFullSpeedDistance = 2.4f;
         public float MouseRunDoubleClickWindow = 0.35f;
+        public float CartRowBodyTurnLagMultiplier = 3f;
 
         // cinemachine
         private float _cinemachineTargetYaw;
@@ -313,7 +314,9 @@ namespace StarterAssets
             }
 
             float rowTurnResponse = Mathf.Max(0.05f, _cartPushController.GetPushedCartRowTurnResponseMultiplier());
-            return RotationSmoothTime / rowTurnResponse;
+            // Rows should visually lead the turn while the player's body catches up, giving the
+            // arms room to show the cart handle pulling across the character.
+            return (RotationSmoothTime / rowTurnResponse) * Mathf.Max(1f, CartRowBodyTurnLagMultiplier);
         }
 
         private bool IsPushingCartRow()

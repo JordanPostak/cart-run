@@ -50,6 +50,7 @@ public partial class CartController
         nestedRowGrabbedTurnSlowdownPerExtraCart = Mathf.Max(0f, nestedRowGrabbedTurnSlowdownPerExtraCart);
         nestedRowVisualAimMaxYaw = Mathf.Clamp(nestedRowVisualAimMaxYaw, 0f, 60f);
         nestedRowVisualAimResponse = Mathf.Max(0f, nestedRowVisualAimResponse);
+        nestedRowVisualAimReturnResponse = Mathf.Max(0f, nestedRowVisualAimReturnResponse);
         rowCollisionSkin = Mathf.Max(0f, rowCollisionSkin);
         nestedCollisionRefreshInterval = Mathf.Max(0.02f, nestedCollisionRefreshInterval);
         playerTipPushForce = Mathf.Max(0f, playerTipPushForce);

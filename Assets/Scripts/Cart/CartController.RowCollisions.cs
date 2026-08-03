@@ -3,6 +3,39 @@ using UnityEngine;
 
 public partial class CartController
 {
+    private bool CanApplyRowVisualMotion(List<CartController> row, Vector3 pivot, Quaternion visualOffset)
+    {
+        if (!blockRowMovementOnCollision || row == null || row.Count == 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < row.Count; i++)
+        {
+            CartController cart = row[i];
+            if (cart == null || cart.isTipped || cart.rb == null)
+            {
+                continue;
+            }
+
+            Vector3 visualPosition = pivot + visualOffset * (cart.rb.position - pivot);
+            visualPosition.y = cart.plantedY;
+            Vector3 displacement = visualPosition - cart.rb.position;
+            float distance = displacement.magnitude;
+            if (distance < 0.001f)
+            {
+                continue;
+            }
+
+            if (GetNearestRowMotionBlockerDistance(cart, row, displacement / distance, distance + rowCollisionSkin) >= 0f)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void LimitRowMotionByCollision(List<CartController> row, Vector3 pivot, ref Quaternion deltaRotation, ref Vector3 deltaPosition)
     {
         if (!blockRowMovementOnCollision || row == null || row.Count == 0)

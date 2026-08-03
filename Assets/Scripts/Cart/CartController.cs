@@ -67,7 +67,8 @@ public partial class CartController : MonoBehaviour
     [SerializeField] private float nestedRowGrabbedTurnSpeedMultiplier = 0.35f;
     [SerializeField] private float nestedRowGrabbedTurnSlowdownPerExtraCart = 0.35f;
     [SerializeField] private float nestedRowVisualAimMaxYaw = 28f;
-    [SerializeField] private float nestedRowVisualAimResponse = 8f;
+    [SerializeField] private float nestedRowVisualAimResponse = 5f;
+    [SerializeField] private float nestedRowVisualAimReturnResponse = 2.5f;
     [SerializeField] private bool blockRowMovementOnCollision = true;
     [SerializeField] private float rowCollisionSkin = 0.03f;
     [SerializeField] private bool ignoreNestedCartCollisions = true;

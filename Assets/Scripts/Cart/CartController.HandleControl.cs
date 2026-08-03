@@ -179,16 +179,33 @@ public partial class CartController
         float targetYaw = 0f;
         if (steerDirection.sqrMagnitude > 0.001f)
         {
-            Vector3 rowForward = GetCartForward();
-            targetYaw = Mathf.Clamp(Vector3.SignedAngle(rowForward, steerDirection.normalized, Vector3.up), -nestedRowVisualAimMaxYaw, nestedRowVisualAimMaxYaw);
+            Vector3 grabberForward = Vector3.ProjectOnPlane(grabberFollowRotation * Vector3.forward, Vector3.up);
+            if (grabberForward.sqrMagnitude < 0.001f)
+            {
+                grabberForward = GetCartForward();
+            }
+
+            // Visual lead should only appear when the steering direction differs from the
+            // player's current body direction. Straight movement keeps the row visually neutral.
+            targetYaw = Mathf.Clamp(Vector3.SignedAngle(grabberForward.normalized, steerDirection.normalized, Vector3.up), -nestedRowVisualAimMaxYaw, nestedRowVisualAimMaxYaw);
         }
 
-        currentNestedRowVisualAimYaw = Mathf.Lerp(currentNestedRowVisualAimYaw, targetYaw, 1f - Mathf.Exp(-nestedRowVisualAimResponse * Time.fixedDeltaTime));
+        float visualAimResponse = IsReturningRowVisualAimToCenter(targetYaw) ? nestedRowVisualAimReturnResponse : nestedRowVisualAimResponse;
+        currentNestedRowVisualAimYaw = Mathf.Lerp(currentNestedRowVisualAimYaw, targetYaw, 1f - Mathf.Exp(-visualAimResponse * Time.fixedDeltaTime));
         Vector3 grabPointPivot = GetCartGrabPointPosition();
         Quaternion visualOffset = Quaternion.AngleAxis(currentNestedRowVisualAimYaw, Vector3.up);
+        if (!CanApplyRowVisualMotion(row, grabPointPivot, visualOffset))
+        {
+            currentNestedRowVisualAimYaw = Mathf.MoveTowards(currentNestedRowVisualAimYaw, 0f, nestedRowVisualAimResponse * Time.fixedDeltaTime);
+            visualOffset = Quaternion.AngleAxis(currentNestedRowVisualAimYaw, Vector3.up);
+            if (!CanApplyRowVisualMotion(row, grabPointPivot, visualOffset))
+            {
+                currentNestedRowVisualAimYaw = 0f;
+                return;
+            }
+        }
+
         Vector3 visualDeltaPosition = Vector3.zero;
-        LimitRowMotionByCollision(row, grabPointPivot, ref visualOffset, ref visualDeltaPosition);
-        currentNestedRowVisualAimYaw = Mathf.DeltaAngle(0f, visualOffset.eulerAngles.y);
 
         for (int i = 0; i < row.Count; i++)
         {
@@ -221,6 +238,16 @@ public partial class CartController
             cart.transform.position = visualPosition;
             cart.transform.rotation = uprightRotation;
         }
+    }
+
+    private bool IsReturningRowVisualAimToCenter(float targetYaw)
+    {
+        if (Mathf.Abs(targetYaw) < 0.01f)
+        {
+            return Mathf.Abs(currentNestedRowVisualAimYaw) > 0.01f;
+        }
+
+        return Mathf.Sign(targetYaw) == Mathf.Sign(currentNestedRowVisualAimYaw) && Mathf.Abs(targetYaw) < Mathf.Abs(currentNestedRowVisualAimYaw);
     }
 
     private Quaternion GetRowCenterHandleDeltaRotation(Vector3 rowCenter, int rowCount)

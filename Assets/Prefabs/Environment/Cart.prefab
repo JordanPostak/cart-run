@@ -3089,7 +3089,8 @@ MonoBehaviour:
   nestedRowGrabbedTurnSpeedMultiplier: 0.35
   nestedRowGrabbedTurnSlowdownPerExtraCart: 0.35
   nestedRowVisualAimMaxYaw: 28
-  nestedRowVisualAimResponse: 8
+  nestedRowVisualAimResponse: 5
+  nestedRowVisualAimReturnResponse: 2.5
   blockRowMovementOnCollision: 1
   rowCollisionSkin: 0.03
   ignoreNestedCartCollisions: 1
@@ -3105,7 +3106,7 @@ MonoBehaviour:
   tippedAngularDamping: 1.2
   tippedRollingResistanceMultiplier: 6
   handleAnchor: {fileID: 0}
-  cartGrabPoint: {fileID: 0}
+  cartGrabPoint: {fileID: 68824611393274591}
   grabDistance: 1.15
   grabSideDot: 0.35
   grabbedDriveSpeed: 3.8
