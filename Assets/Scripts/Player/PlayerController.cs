@@ -29,6 +29,10 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float mouseControlStopDistance = 0.35f;
     [SerializeField] private float mouseControlFullSpeedDistance = 2.4f;
     [SerializeField] private float mouseControlInputLerpSpeed = 10f;
+    [Header("Character Animation")]
+    [SerializeField] private Animator characterAnimatorOverride;
+    [SerializeField] private bool driveCharacterAnimatorFromPlayerMotion = false;
+    [SerializeField] private float characterAnimationSpeedSmoothing = 10f;
 
     private Rigidbody rb;
     private CapsuleCollider capsule;
@@ -47,6 +51,11 @@ public class PlayerController : MonoBehaviour
     private Transform visualRoot;
     private Vector3 visualRootLocalPosition;
     private Quaternion visualRootLocalRotation;
+    private Vector3 lastCharacterAnimationPosition;
+    private float currentCharacterAnimationSpeed;
+    private int animIDSpeed;
+    private int animIDGrounded;
+    private int animIDMotionSpeed;
     private bool useNestedMovementController;
     private Behaviour[] disabledGrabPushBehaviours;
 
@@ -63,7 +72,7 @@ public class PlayerController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         capsule = GetComponent<CapsuleCollider>();
         handleIK = GetComponentInChildren<PlayerCartHandleIK>();
-        playerAnimator = GetComponentInChildren<Animator>();
+        playerAnimator = ResolveCharacterAnimator();
         if (handleIK == null)
         {
             if (playerAnimator != null)
@@ -84,6 +93,9 @@ public class PlayerController : MonoBehaviour
         rb.constraints = RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
 
         CacheVisualRoot();
+        ConfigureStarterAssetsAnimatorOverride();
+        CacheAnimationIDs();
+        lastCharacterAnimationPosition = GetCharacterAnimationPosition();
         ConfigureRootCapsule();
         playerColliders = GetComponentsInChildren<Collider>();
     }
@@ -167,6 +179,8 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
+        UpdateCharacterAnimationFromMotion();
+
         if (grabbedCart != null)
         {
             grabbedCart.SetGrabberFollowTarget(this, GetGrabberPosition(), GetGrabberRotation(), new Vector2(movementInput.x, movementInput.z));
@@ -278,10 +292,111 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private Animator ResolveCharacterAnimator()
+    {
+        if (IsUsableCharacterAnimator(characterAnimatorOverride))
+        {
+            return characterAnimatorOverride;
+        }
+
+        Animator[] animators = GetComponentsInChildren<Animator>(true);
+        foreach (Animator animator in animators)
+        {
+            if (IsUsableCharacterAnimator(animator) && animator.gameObject.name.StartsWith("npc_"))
+            {
+                return animator;
+            }
+        }
+
+        foreach (Animator animator in animators)
+        {
+            if (animator != null && animator.isActiveAndEnabled && animator.runtimeAnimatorController != null)
+            {
+                return animator;
+            }
+        }
+
+        return animators.Length > 0 ? animators[0] : null;
+    }
+
+    private bool IsUsableCharacterAnimator(Animator animator)
+    {
+        return animator != null && animator.isActiveAndEnabled && animator.gameObject.activeInHierarchy;
+    }
+
+    private void CacheAnimationIDs()
+    {
+        animIDSpeed = Animator.StringToHash("Speed");
+        animIDGrounded = Animator.StringToHash("Grounded");
+        animIDMotionSpeed = Animator.StringToHash("MotionSpeed");
+    }
+
+    private void UpdateCharacterAnimationFromMotion()
+    {
+        if (!driveCharacterAnimatorFromPlayerMotion || playerAnimator == null || !playerAnimator.isActiveAndEnabled)
+        {
+            lastCharacterAnimationPosition = GetCharacterAnimationPosition();
+            return;
+        }
+
+        Vector3 currentPosition = GetCharacterAnimationPosition();
+        Vector3 planarDelta = Vector3.ProjectOnPlane(currentPosition - lastCharacterAnimationPosition, Vector3.up);
+        float rawSpeed = Time.deltaTime > 0f ? planarDelta.magnitude / Time.deltaTime : 0f;
+        currentCharacterAnimationSpeed = Mathf.Lerp(currentCharacterAnimationSpeed, rawSpeed, 1f - Mathf.Exp(-characterAnimationSpeedSmoothing * Time.deltaTime));
+
+        playerAnimator.SetBool(animIDGrounded, true);
+        playerAnimator.SetFloat(animIDSpeed, currentCharacterAnimationSpeed);
+        playerAnimator.SetFloat(animIDMotionSpeed, currentCharacterAnimationSpeed > 0.05f ? 1f : 0f);
+        lastCharacterAnimationPosition = currentPosition;
+    }
+
+    private Vector3 GetCharacterAnimationPosition()
+    {
+        if (visualRoot != null)
+        {
+            return visualRoot.position;
+        }
+
+        return transform.position;
+    }
+
     private bool IsNestedMovementBehaviour(Behaviour behaviour)
     {
         string typeName = behaviour.GetType().FullName;
         return typeName == "StarterAssets.ThirdPersonController" || IsPushBehaviour(behaviour);
+    }
+
+    private void ConfigureStarterAssetsAnimatorOverride()
+    {
+        if (playerAnimator == null)
+        {
+            return;
+        }
+
+        // PlayerController finds the visible swapped character first, then hands that same
+        // Animator to Starter Assets so walking, running, turning, and jumping all come from
+        // the StarterAssetsThirdPerson controller instead of our cart helper code.
+        StarterAssets.ThirdPersonController[] movementControllers = GetComponentsInChildren<StarterAssets.ThirdPersonController>(true);
+        foreach (StarterAssets.ThirdPersonController movementController in movementControllers)
+        {
+            if (movementController == null)
+            {
+                continue;
+            }
+
+            Animator starterAssetsAnimator = movementController.GetComponent<Animator>();
+            if (playerAnimator.runtimeAnimatorController == null && starterAssetsAnimator != null)
+            {
+                playerAnimator.runtimeAnimatorController = starterAssetsAnimator.runtimeAnimatorController;
+            }
+
+            if (playerAnimator.avatar == null && starterAssetsAnimator != null)
+            {
+                playerAnimator.avatar = starterAssetsAnimator.avatar;
+            }
+
+            movementController.CharacterAnimatorOverride = playerAnimator;
+        }
     }
 
     private void DisableGrabPushBehaviours()

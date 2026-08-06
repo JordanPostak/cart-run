@@ -28,12 +28,19 @@ namespace StarterAssets
         [Tooltip("Acceleration and deceleration")]
         public float SpeedChangeRate = 10.0f;
 
+        [Tooltip("Animator to drive for the visible character. Leave empty to use the Animator on this object or the first child Animator.")]
+        public Animator CharacterAnimatorOverride;
+
         public AudioSource AudioFootsteps;
         public AudioSource LandingAudio;
         public AudioSource AudioFoley;
         public AudioClip LandingAudioClip;
         public AudioClip[] FootstepAudioClips;
         [Range(0, 1)] public float FootstepAudioVolume = 0.5f;
+
+        [Space(10)]
+        [Tooltip("Whether this character can jump. Disable this when the visible character does not have matching jump animations.")]
+        public bool AllowJump = true;
 
         [Space(10)]
         [Tooltip("The height the player can jump")]
@@ -149,7 +156,7 @@ namespace StarterAssets
         {
             _cinemachineTargetYaw = CinemachineCameraTarget.transform.rotation.eulerAngles.y;
 
-            _hasAnimator = TryGetComponent(out _animator);
+            CacheAnimator();
             _controller = GetComponent<CharacterController>();
             _input = GetComponent<StarterAssetsInputs>();
             _cartPushController = GetComponentInParent<PlayerController>();
@@ -168,12 +175,33 @@ namespace StarterAssets
 
         private void Update()
         {
-            _hasAnimator = TryGetComponent(out _animator);
+            CacheAnimator();
             UpdateMouseClickRunState();
 
             JumpAndGravity();
             GroundedCheck();
             Move();
+        }
+
+        private void CacheAnimator()
+        {
+            if (CharacterAnimatorOverride != null)
+            {
+                _animator = CharacterAnimatorOverride;
+                _hasAnimator = _animator.isActiveAndEnabled;
+                return;
+            }
+
+            if (TryGetComponent(out _animator))
+            {
+                _hasAnimator = true;
+                return;
+            }
+
+            // Our player root owns the movement/cart logic, while the visible character can be
+            // swapped as a child model. Drive that child Animator when the root has none.
+            _animator = GetComponentInChildren<Animator>();
+            _hasAnimator = _animator != null;
         }
 
         private void LateUpdate()
@@ -399,8 +427,13 @@ namespace StarterAssets
                     _verticalVelocity = -2f;
                 }
 
+                if (!AllowJump)
+                {
+                    _input.jump = false;
+                }
+
                 // Jump
-                if (_input.jump && _jumpTimeoutDelta <= 0.0f)
+                if (AllowJump && _input.jump && _jumpTimeoutDelta <= 0.0f)
                 {
                     // the square root of H * -2 * G = how much velocity needed to reach desired height
                     _verticalVelocity = Mathf.Sqrt(JumpHeight * -2f * Gravity);

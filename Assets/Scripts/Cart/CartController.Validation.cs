@@ -52,6 +52,7 @@ public partial class CartController
         nestedRowVisualAimResponse = Mathf.Max(0f, nestedRowVisualAimResponse);
         nestedRowVisualAimReturnResponse = Mathf.Max(0f, nestedRowVisualAimReturnResponse);
         rowCollisionSkin = Mathf.Max(0f, rowCollisionSkin);
+        rowCollisionStepOverHeight = Mathf.Max(0f, rowCollisionStepOverHeight);
         nestedCollisionRefreshInterval = Mathf.Max(0.02f, nestedCollisionRefreshInterval);
         playerTipPushForce = Mathf.Max(0f, playerTipPushForce);
         playerTipPushSpeed = Mathf.Max(0f, playerTipPushSpeed);

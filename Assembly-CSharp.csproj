@@ -82,6 +82,7 @@
     <Compile Include="Assets\Scripts\Cart\CartController.RowNesting.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Assets\npc_casual_set_00\readme.txt" />
     <None Include="Assets\StarterAssets\license.txt" />
   </ItemGroup>
   <ItemGroup>

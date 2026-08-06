@@ -71,6 +71,7 @@ public partial class CartController : MonoBehaviour
     [SerializeField] private float nestedRowVisualAimReturnResponse = 2.5f;
     [SerializeField] private bool blockRowMovementOnCollision = true;
     [SerializeField] private float rowCollisionSkin = 0.03f;
+    [SerializeField] private float rowCollisionStepOverHeight = 0.18f;
     [SerializeField] private bool ignoreNestedCartCollisions = true;
     [SerializeField] private float nestedCollisionRefreshInterval = 0.25f;
 

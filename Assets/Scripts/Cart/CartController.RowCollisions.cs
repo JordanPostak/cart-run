@@ -90,7 +90,7 @@ public partial class CartController
         for (int i = 0; i < hits.Length; i++)
         {
             Collider hitCollider = hits[i].collider;
-            if (!IsRowMotionBlocker(hitCollider, row))
+            if (!IsRowMotionBlocker(hitCollider, row, cart))
             {
                 continue;
             }
@@ -104,7 +104,7 @@ public partial class CartController
         return nearestDistance;
     }
 
-    private bool IsRowMotionBlocker(Collider hitCollider, List<CartController> row)
+    private bool IsRowMotionBlocker(Collider hitCollider, List<CartController> row, CartController movingCart)
     {
         if (hitCollider == null || hitCollider.isTrigger)
         {
@@ -122,6 +122,14 @@ public partial class CartController
         // The player is intentionally attached to the rear handle while steering a row, so
         // player colliders should not be treated as world obstacles for the row sweep.
         if (hitCollider.GetComponentInParent<PlayerController>() != null)
+        {
+            return false;
+        }
+
+        // Tiny raised features like vestibule lips/painted curb edges should not stop a cart
+        // row. Taller colliders still block normally, so poles, rails, walls, and cars remain
+        // solid obstacles.
+        if (movingCart != null && rowCollisionStepOverHeight > 0f && hitCollider.bounds.max.y <= movingCart.plantedY + rowCollisionStepOverHeight)
         {
             return false;
         }
