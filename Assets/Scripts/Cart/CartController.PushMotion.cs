@@ -11,6 +11,8 @@ public partial class CartController
             return;
         }
 
+        WakeDormantCart();
+
         if (isTipped)
         {
             rb.AddForceAtPosition(force / tippedRollingResistanceMultiplier, point, ForceMode.Force);

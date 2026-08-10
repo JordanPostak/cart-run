@@ -21,9 +21,11 @@ public partial class CartController
 
         Vector3 horizontalRelativeVelocity = Vector3.ProjectOnPlane(collision.relativeVelocity, Vector3.up);
         bool hitByPlayer = collision.transform.GetComponentInParent<PlayerController>() != null || collision.transform.name.Contains("Player");
+        bool hitByCustomer = collision.transform.GetComponentInParent<CustomerCartPusher>() != null;
 
-        if (hitByPlayer)
+        if (hitByPlayer || hitByCustomer)
         {
+            WakeDormantCart();
             return;
         }
 

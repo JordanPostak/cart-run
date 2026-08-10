@@ -3,20 +3,21 @@ using UnityEngine;
 
 public partial class CartController
 {
-    public bool TryGrab(PlayerController player)
+    public bool TryGrab(ICartGrabber grabber)
     {
         CartController grabLeader = GetRowGrabLeader();
         if (grabLeader != this)
         {
-            return grabLeader.TryGrab(player);
+            return grabLeader.TryGrab(grabber);
         }
 
-        if (player == null || isTipped || grabbedPlayer != null || !IsPlayerOnHandleSide(player.GetGrabberPosition()))
+        if (grabber == null || isTipped || grabbedCartGrabber != null || !IsPlayerOnHandleSide(grabber.GetGrabberPosition()))
         {
             return false;
         }
 
-        grabbedPlayer = player;
+        WakeDormantCart();
+        grabbedCartGrabber = grabber;
         grabbedInput = Vector2.zero;
         hasGrabberFollowTarget = false;
         isTipped = false;
@@ -28,7 +29,7 @@ public partial class CartController
         rb.angularDamping = angularDamping;
         ApplyRotationConstraints();
         UpdateGrabbedPlayerPose(rb.position, rb.rotation);
-        grabbedPlayer.AttachToCart(this);
+        grabbedCartGrabber.AttachToCart(this);
         return true;
     }
 
@@ -43,33 +44,33 @@ public partial class CartController
         return GetRowGrabLeader().GetCartGrabPointPosition();
     }
 
-    public void ReleaseGrab(PlayerController player)
+    public void ReleaseGrab(ICartGrabber grabber)
     {
-        if (grabbedPlayer == player)
+        if (grabbedCartGrabber == grabber)
         {
-            grabbedPlayer.DetachFromCart(this);
-            grabbedPlayer = null;
+            grabbedCartGrabber.DetachFromCart(this);
+            grabbedCartGrabber = null;
             grabbedInput = Vector2.zero;
             hasGrabberFollowTarget = false;
         }
     }
 
-    public bool IsGrabbedBy(PlayerController player)
+    public bool IsGrabbedBy(ICartGrabber grabber)
     {
-        return grabbedPlayer == player;
+        return grabbedCartGrabber == grabber;
     }
 
-    public void SetGrabInput(PlayerController player, Vector2 input)
+    public void SetGrabInput(ICartGrabber grabber, Vector2 input)
     {
-        if (grabbedPlayer == player)
+        if (grabbedCartGrabber == grabber)
         {
             grabbedInput = Vector2.ClampMagnitude(input, 1f);
         }
     }
 
-    public void SetGrabberFollowTarget(PlayerController player, Vector3 grabberPosition, Quaternion grabberRotation, Vector2 input)
+    public void SetGrabberFollowTarget(ICartGrabber grabber, Vector3 grabberPosition, Quaternion grabberRotation, Vector2 input)
     {
-        if (grabbedPlayer != player || isTipped)
+        if (grabbedCartGrabber != grabber || isTipped)
         {
             return;
         }
@@ -421,7 +422,7 @@ public partial class CartController
 
     private void RefreshGrabbedPlayerPose()
     {
-        if (grabbedPlayer == null)
+        if (grabbedCartGrabber == null)
         {
             return;
         }

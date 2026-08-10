@@ -122,7 +122,7 @@ public partial class CartController
 
     private void StabilizeIdleCart()
     {
-        if (isTipped || grabbedPlayer != null || Time.time - lastExternalPushTime < idleSleepDelay)
+        if (isTipped || grabbedCartGrabber != null || Time.time - lastExternalPushTime < idleSleepDelay)
         {
             return;
         }

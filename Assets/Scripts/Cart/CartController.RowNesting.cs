@@ -287,6 +287,7 @@ public partial class CartController
             return false;
         }
 
+        cart.WakeDormantCart();
         cart.NormalizeRowState();
         if (cart.rowLeader != null || cart.explicitRowCarts.Count > 0 || cart.rowObject != null)
         {
@@ -867,9 +868,9 @@ public partial class CartController
     private Vector3 GetRowForward()
     {
         Vector3 rowForward = Vector3.zero;
-        if (grabbedPlayer != null)
+        if (grabbedCartGrabber != null)
         {
-            rowForward = Vector3.ProjectOnPlane(grabbedPlayer.GetGrabberRotation() * Vector3.forward, Vector3.up);
+            rowForward = Vector3.ProjectOnPlane(grabbedCartGrabber.GetGrabberRotation() * Vector3.forward, Vector3.up);
         }
 
         if (rowForward.sqrMagnitude < 0.001f && hasGrabberFollowTarget)

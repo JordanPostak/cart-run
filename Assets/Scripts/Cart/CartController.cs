@@ -114,7 +114,7 @@ public partial class CartController : MonoBehaviour
     private float currentCasterAngle;
     private float plantedY;
     private bool isTipped;
-    private PlayerController grabbedPlayer;
+    private ICartGrabber grabbedCartGrabber;
     private Vector2 grabbedInput;
     private bool hasGrabberFollowTarget;
     private Vector3 grabberFollowPosition;
@@ -136,6 +136,7 @@ public partial class CartController : MonoBehaviour
     private bool wasKinematicBeforeRow;
     private Vector3 rowStartPosition;
     private Quaternion rowCartLocalRotation = Quaternion.identity;
+    private bool isDormantParked;
     private readonly List<CartController> explicitRowCarts = new List<CartController>();
     private readonly List<CartController> ignoredNestedCollisionCarts = new List<CartController>();
     private readonly List<CartController> detachedRowCollisionCarts = new List<CartController>();
@@ -143,8 +144,98 @@ public partial class CartController : MonoBehaviour
     private float currentNestedRowVisualAimYaw;
 
     public bool IsTipped => isTipped;
-    public bool IsGrabbed => GetRowGrabLeader().grabbedPlayer != null;
+    public bool IsGrabbed => GetRowGrabLeader().grabbedCartGrabber != null;
+    public bool IsDormantParked => isDormantParked;
     public static IReadOnlyList<CartController> ActiveCarts => activeCarts;
+
+    public void RefreshPlantedHeight()
+    {
+        if (rb == null)
+        {
+            rb = GetComponent<Rigidbody>();
+        }
+
+        plantedY = rb.position.y;
+        Vector3 velocity = rb.linearVelocity;
+        rb.linearVelocity = new Vector3(velocity.x, 0f, velocity.z);
+    }
+
+    public void ParkAsDormant()
+    {
+        CartController leader = GetRowGrabLeader();
+        if (leader != this)
+        {
+            leader.ParkAsDormant();
+            return;
+        }
+
+        foreach (CartController rowCart in GetExplicitRow())
+        {
+            if (rowCart != null)
+            {
+                rowCart.ParkSingleCartAsDormant();
+            }
+        }
+    }
+
+    private void ParkSingleCartAsDormant()
+    {
+        if (rb == null)
+        {
+            rb = GetComponent<Rigidbody>();
+        }
+
+        isDormantParked = true;
+        hasGrabberFollowTarget = false;
+        grabbedInput = Vector2.zero;
+        forwardRollMomentum = 0f;
+        sidePivotMomentum = 0f;
+        hasSidePivotWorldPoint = false;
+        RefreshPlantedHeight();
+        EnforceUprightPose();
+        EnforcePlantedHeight();
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        rb.isKinematic = true;
+        rb.Sleep();
+    }
+
+    private void WakeDormantCart()
+    {
+        CartController leader = GetRowGrabLeader();
+        if (leader != this)
+        {
+            leader.WakeDormantCart();
+            return;
+        }
+
+        foreach (CartController rowCart in GetExplicitRow())
+        {
+            if (rowCart != null)
+            {
+                rowCart.WakeSingleDormantCart();
+            }
+        }
+    }
+
+    private void WakeSingleDormantCart()
+    {
+        if (!isDormantParked)
+        {
+            return;
+        }
+
+        if (rb == null)
+        {
+            rb = GetComponent<Rigidbody>();
+        }
+
+        isDormantParked = false;
+        rb.isKinematic = false;
+        rb.WakeUp();
+        ApplyRotationConstraints();
+        RefreshPlantedHeight();
+    }
 
     private void Awake()
     {
@@ -249,6 +340,11 @@ public partial class CartController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (isDormantParked)
+        {
+            return;
+        }
+
         UpdateDetachedRowCollisionIgnores();
 
         if (rowLeader != null && rowLeader != this)
@@ -269,7 +365,7 @@ public partial class CartController : MonoBehaviour
             return;
         }
 
-        if (grabbedPlayer != null && !isTipped)
+        if (grabbedCartGrabber != null && !isTipped)
         {
             ApplyGrabberFollowTarget();
             if (keepCartUpright)

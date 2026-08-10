@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 [RequireComponent(typeof(Rigidbody))]
 [RequireComponent(typeof(CapsuleCollider))]
-public class PlayerController : MonoBehaviour
+public class PlayerController : MonoBehaviour, ICartGrabber
 {
     [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private float capsuleHeight = 1.8f;
