@@ -10,6 +10,8 @@ public class CustomerCartSpawner : MonoBehaviour
 
     [Header("Spawn Points")]
     [SerializeField] private Transform[] doorwaySpawnPoints;
+    [SerializeField] private bool snapSpawnPointToGround;
+    [SerializeField] private float initialCartSpawnClearance = 2f;
     [SerializeField] private LayerMask spawnGroundLayers = -1;
     [SerializeField] private float spawnGroundRayHeight = 5f;
     [SerializeField] private float spawnGroundRayDistance = 20f;
@@ -17,6 +19,10 @@ public class CustomerCartSpawner : MonoBehaviour
     [SerializeField] private Vector2 parkingLotDestinationSize = new Vector2(40f, 40f);
     [SerializeField] private Transform[] explicitDestinationPoints;
     [SerializeField] private Transform roadWaypointRoot;
+
+    [Header("Walk Areas")]
+    [SerializeField] private Transform walkAreaRoot;
+    [SerializeField] private CustomerWalkAreaMap walkAreaMap;
 
     [Header("Timing")]
     [SerializeField] private bool spawnOnStart = true;
@@ -35,6 +41,7 @@ public class CustomerCartSpawner : MonoBehaviour
 
     private void Start()
     {
+        ResolveWalkAreaMap();
         nextSpawnTime = Time.time + spawnInterval;
         if (spawnOnStart)
         {
@@ -71,10 +78,11 @@ public class CustomerCartSpawner : MonoBehaviour
 
         Vector3 spawnPosition = GetGroundedPosition(spawnPoint.position);
         CustomerCartPusher customer = Instantiate(customerPrefab, spawnPosition, spawnPoint.rotation);
-        CartController cart = Instantiate(cartPrefab, spawnPosition, spawnPoint.rotation);
+        Vector3 cartSpawnPosition = spawnPosition + spawnPoint.forward * initialCartSpawnClearance;
+        CartController cart = Instantiate(cartPrefab, cartSpawnPosition, spawnPoint.rotation);
         cart.transform.localScale = spawnedCartScale;
 
-        customer.Initialize(cart, GetRandomDestinationRoute(spawnPoint), this);
+        customer.Initialize(cart, GetConstrainedRoute(spawnPosition, GetRandomDestinationRoute(spawnPoint)), this, walkAreaMap);
         activeCustomers.Add(customer);
     }
 
@@ -170,6 +178,16 @@ public class CustomerCartSpawner : MonoBehaviour
         return route.ToArray();
     }
 
+    private Vector3[] GetConstrainedRoute(Vector3 spawnPosition, Vector3[] route)
+    {
+        if (walkAreaMap == null || !walkAreaMap.HasAreas)
+        {
+            return route;
+        }
+
+        return walkAreaMap.BuildRoute(spawnPosition, route);
+    }
+
     private Vector3[] BuildRoute(Transform spawnPoint, Transform destination)
     {
         List<Vector3> route = new List<Vector3>();
@@ -242,6 +260,11 @@ public class CustomerCartSpawner : MonoBehaviour
 
     private Vector3 GetGroundedPosition(Vector3 position)
     {
+        if (!snapSpawnPointToGround)
+        {
+            return position;
+        }
+
         Vector3 rayStart = position + Vector3.up * spawnGroundRayHeight;
         if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, spawnGroundRayDistance, spawnGroundLayers, QueryTriggerInteraction.Ignore))
         {
@@ -249,6 +272,40 @@ public class CustomerCartSpawner : MonoBehaviour
         }
 
         return position;
+    }
+
+    private void ResolveWalkAreaMap()
+    {
+        if (walkAreaMap != null)
+        {
+            return;
+        }
+
+        if (walkAreaRoot == null)
+        {
+            GameObject walkAreas = GameObject.Find("CustomerWalkAreas");
+            if (walkAreas != null)
+            {
+                walkAreaRoot = walkAreas.transform;
+            }
+        }
+
+        if (walkAreaRoot == null)
+        {
+            Debug.LogWarning($"{nameof(CustomerCartSpawner)} could not find CustomerWalkAreas, so spawned customers will not be confined to walk areas.", this);
+            return;
+        }
+
+        walkAreaMap = walkAreaRoot.GetComponent<CustomerWalkAreaMap>();
+        if (walkAreaMap == null)
+        {
+            walkAreaMap = walkAreaRoot.gameObject.AddComponent<CustomerWalkAreaMap>();
+        }
+
+        if (!walkAreaMap.HasAreas)
+        {
+            Debug.LogWarning($"{nameof(CustomerWalkAreaMap)} on {walkAreaRoot.name} did not find any child BoxColliders/Renderers to use as customer walk areas.", walkAreaRoot);
+        }
     }
 
     private void PruneInactiveCustomers()

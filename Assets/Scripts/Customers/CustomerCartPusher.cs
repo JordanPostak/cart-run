@@ -7,6 +7,7 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
     [Header("Movement")]
     [SerializeField] private float walkSpeed = 1.8f;
     [SerializeField] private float turnSpeed = 540f;
+    [SerializeField] private float waypointStopDistance = 0.12f;
     [SerializeField] private float destinationStopDistance = 0.7f;
     [SerializeField] private float despawnDelayAfterDropoff = 1.5f;
 
@@ -22,6 +23,7 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
     [SerializeField] private LayerMask cartGroundLayers = -1;
     [SerializeField] private float cartGroundRayHeight = 3f;
     [SerializeField] private float cartGroundRayDistance = 8f;
+    [SerializeField] private float cartGroundMaxStepUp = 0.75f;
     [SerializeField] private float cartRootGroundOffset = 0.013f;
 
     [Header("Animation")]
@@ -32,7 +34,10 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
     private CharacterController characterController;
     private CartController cart;
     private CustomerCartSpawner spawner;
+    private CustomerWalkAreaMap walkAreaMap;
     private PlayerCartHandleIK handleIK;
+    private Collider[] customerColliders;
+    private Collider[] ignoredCartColliders;
     private Vector3 destination;
     private Vector3[] routePoints;
     private int routeIndex;
@@ -50,6 +55,7 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
     private void Awake()
     {
         characterController = GetComponent<CharacterController>();
+        customerColliders = GetComponentsInChildren<Collider>();
 
         // A scene/template reference can point at the original character instead of the spawned
         // clone. Always prefer the Animator that belongs to this customer instance.
@@ -74,8 +80,14 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
 
     public void Initialize(CartController spawnedCart, Vector3[] parkingLotRoute, CustomerCartSpawner owningSpawner)
     {
+        Initialize(spawnedCart, parkingLotRoute, owningSpawner, null);
+    }
+
+    public void Initialize(CartController spawnedCart, Vector3[] parkingLotRoute, CustomerCartSpawner owningSpawner, CustomerWalkAreaMap customerWalkAreaMap)
+    {
         cart = spawnedCart;
         spawner = owningSpawner;
+        walkAreaMap = customerWalkAreaMap;
         routePoints = parkingLotRoute;
         routeIndex = 0;
         hasDestination = TrySetCurrentDestination();
@@ -108,7 +120,8 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
 
         Vector3 toDestination = Vector3.ProjectOnPlane(destination - transform.position, Vector3.up);
         float distance = toDestination.magnitude;
-        if (distance <= destinationStopDistance)
+        float stopDistance = routePoints != null && routeIndex < routePoints.Length - 1 ? waypointStopDistance : destinationStopDistance;
+        if (distance <= stopDistance)
         {
             routeIndex++;
             if (!TrySetCurrentDestination())
@@ -121,7 +134,7 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
 
         Vector3 moveDirection = toDestination.normalized;
         TurnToward(moveDirection);
-        Move(moveDirection);
+        Move(moveDirection, destination);
 
         if (cart != null)
         {
@@ -131,6 +144,11 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
         UpdateBlockedCartRecovery(distance);
 
         UpdateAnimation(walkSpeed);
+    }
+
+    private void OnDestroy()
+    {
+        RestoreIgnoredCartCollisions();
     }
 
     public Vector3 GetGrabberPosition()
@@ -146,6 +164,7 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
     public void AttachToCart(CartController attachedCart)
     {
         cart = attachedCart;
+        IgnoreAttachedCartCollisions(attachedCart);
         SetHandleIKCart(attachedCart);
     }
 
@@ -153,6 +172,7 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
     {
         if (cart == detachedCart)
         {
+            RestoreIgnoredCartCollisions();
             SetHandleIKCart(null);
             cart = null;
         }
@@ -212,6 +232,11 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
                 continue;
             }
 
+            if (hit.point.y > transform.position.y + cartGroundMaxStepUp)
+            {
+                continue;
+            }
+
             if (hit.distance < closestDistance)
             {
                 closestDistance = hit.distance;
@@ -222,16 +247,24 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
         return bestHeight;
     }
 
-    private void Move(Vector3 moveDirection)
+    private void Move(Vector3 moveDirection, Vector3 movementTarget)
     {
-        Vector3 velocity = moveDirection * walkSpeed;
+        Vector3 startPosition = transform.position;
+        Vector3 desiredPosition = startPosition + moveDirection * walkSpeed * Time.deltaTime;
+        Vector3 constrainedPosition = desiredPosition;
+        if (walkAreaMap != null && walkAreaMap.HasAreas)
+        {
+            constrainedPosition = walkAreaMap.ConstrainMovement(startPosition, desiredPosition, movementTarget);
+        }
+
+        Vector3 movement = Vector3.ProjectOnPlane(constrainedPosition - startPosition, Vector3.up);
         if (characterController != null && characterController.enabled)
         {
-            characterController.SimpleMove(velocity);
+            characterController.Move(movement);
             return;
         }
 
-        transform.position += velocity * Time.deltaTime;
+        transform.position = startPosition + movement;
     }
 
     private bool TrySetCurrentDestination()
@@ -327,6 +360,48 @@ public class CustomerCartPusher : MonoBehaviour, ICartGrabber
         {
             handleIK.SetCart(targetCart);
         }
+    }
+
+    private void IgnoreAttachedCartCollisions(CartController attachedCart)
+    {
+        RestoreIgnoredCartCollisions();
+        if (attachedCart == null || customerColliders == null)
+        {
+            return;
+        }
+
+        ignoredCartColliders = attachedCart.GetComponentsInChildren<Collider>();
+        foreach (Collider customerCollider in customerColliders)
+        {
+            foreach (Collider cartCollider in ignoredCartColliders)
+            {
+                if (customerCollider != null && cartCollider != null)
+                {
+                    Physics.IgnoreCollision(customerCollider, cartCollider, true);
+                }
+            }
+        }
+    }
+
+    private void RestoreIgnoredCartCollisions()
+    {
+        if (ignoredCartColliders == null || customerColliders == null)
+        {
+            return;
+        }
+
+        foreach (Collider customerCollider in customerColliders)
+        {
+            foreach (Collider cartCollider in ignoredCartColliders)
+            {
+                if (customerCollider != null && cartCollider != null)
+                {
+                    Physics.IgnoreCollision(customerCollider, cartCollider, false);
+                }
+            }
+        }
+
+        ignoredCartColliders = null;
     }
 
     private RuntimeAnimatorController FindStarterAssetsRuntimeController()

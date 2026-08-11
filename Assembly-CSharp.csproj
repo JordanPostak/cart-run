@@ -63,6 +63,7 @@
     <Compile Include="Assets\Scripts\Cart\ICartGrabber.cs" />
     <Compile Include="Assets\StarterAssets\Mobile\Scripts\VirtualInputs\UIVirtualJoystick.cs" />
     <Compile Include="Assets\Scripts\Cart\CartController.Validation.cs" />
+    <Compile Include="Assets\Scripts\Customers\CustomerWalkAreaMap.cs" />
     <Compile Include="Assets\Scripts\Player\PushObj.cs" />
     <Compile Include="Assets\Scripts\Camera\CameraFollow.cs" />
     <Compile Include="Assets\Scripts\Cart\CartController.PushMotion.cs" />
